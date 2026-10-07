@@ -1,0 +1,30 @@
+name: Feature request
+description: Propose a change consistent with the v1 scope.
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: v1 is limited to local consumer ESET HIPS execution-blocking rules from LOLRMM. Enterprise products, domain blocking, background services, telemetry, and unrelated features are out of scope.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What user problem would this solve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe expected behavior and safety implications.
+    validations:
+      required: true
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope and safety
+      options:
+        - label: This does not require unsupported ESET interfaces or broader-than-needed blocking.
+          required: true
+        - label: This does not add background enforcement, telemetry, cloud management, or enterprise ESET support.
+          required: true

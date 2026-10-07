@@ -1,0 +1,33 @@
+name: Bug report
+description: Report a verified defect or reproducible issue.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not include passwords, license keys, sensitive ESET exports, or personal data.
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: What happened, and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: App version, Windows version, and exact ESET consumer product/version if relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: Include safe, minimal steps and whether this was CI or owner live-ESET testing.
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs and evidence
+      description: Redact secrets and sensitive settings. Attach only sanitized output.

@@ -1,0 +1,44 @@
+# Build outputs
+**/bin/
+**/obj/
+**/out/
+**/publish/
+artifacts/
+
+# IDE/user state
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Test and coverage output
+TestResults/
+coverage/
+*.coverage
+
+# Runtime/local application state
+logs/
+backups/
+*.db
+*.sqlite
+*.sqlite3
+settings.local.json
+catalog-cache.json
+
+# Sensitive ESET exports and local test artifacts
+*baseline*.xml
+*with-test-rule*.xml
+*before*.xml
+*after*.xml
+*.pfx
+*.p12
+*.key
+*.pem
+
+# OS noise
+.DS_Store
+Thumbs.db
+desktop.ini

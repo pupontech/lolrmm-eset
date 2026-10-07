@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Project brief and safety scope
+    url: https://github.com/pupontech/lolrmm-eset/blob/main/docs/PROJECT_BRIEF.md
+    about: Review the supported consumer-ESET scope, phase gates, and safety requirements before opening an issue.
