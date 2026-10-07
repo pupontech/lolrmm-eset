@@ -1,11 +1,11 @@
 # Project status
 
-**Setup complete; not started.** The project brief, decision record, phase roadmap, repository scaffold, GitHub repository, Hermes project, and Kanban gate are being established. No research, POC, application code, or ESET configuration work has been performed.
+**Phase 0 research and independent review complete; Phase 1 POC kit is queued.** The project brief, decision record, phase roadmap, public GitHub repository, Hermes project, and Kanban board are set up. No application code, HIPS XML fixture, or ESET configuration mutation has been performed.
 
 ## Current gates
 
-- Phase 0: waiting for explicit owner authorization to start.
-- Phase 1: blocked pending Phase 0 and an owner decision on a safe ESET test environment; do not provision a VM or mutate live ESET as an agent.
+- Phase 0: `docs/research.md` citation/evidence verification passes; Luna fresh-eyes review `t_9b67021c` is complete and reconciled. Phase 0 Kanban card `t_7811fe5e` is ready to close.
+- Phase 1: owner selected an isolated owner-run Windows/ESET test machine or VM. POC app and owner guide tasks are staged behind the owner gate; the owner performs live ESET tests. Do not provision a VM or mutate live ESET as an agent.
 - License: not selected; choose before distribution.
 - GitHub Project board: not created because the current token does not have the `read:project` scope. Hermes Kanban is the execution board; GitHub Issues remain enabled.
 
@@ -14,4 +14,5 @@
 - Local checkout: `/root/Projects/lolrmm-eset/main`
 - GitHub repository: `https://github.com/pupontech/lolrmm-eset`
 - Hermes project/board: `lolrmm-eset`
-- Start gate: see Hermes Kanban root card and `docs/roadmap.md`.
+- Owner-start gate: `t_e1c7af20` (done).
+- Phase 0 review: `t_9b67021c`; owner-run ESET environment decision: recorded in ADR 0001.
