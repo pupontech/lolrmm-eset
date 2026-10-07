@@ -1,0 +1,69 @@
+name: Phase 1 guided owner kit
+on:
+  workflow_dispatch:
+  push:
+    branches: ['feat/phase1-recreated-kit']
+    paths:
+      - 'poc/automated/**'
+      - 'poc/LolrmmEsetTest/**'
+      - '.github/workflows/phase1-kit.yml'
+  pull_request:
+    paths:
+      - 'poc/automated/**'
+      - 'poc/LolrmmEsetTest/**'
+      - '.github/workflows/phase1-kit.yml'
+permissions:
+  contents: read
+jobs:
+  kit:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Test helpers with Windows PowerShell 5.1
+        shell: powershell
+        run: ./poc/automated/tests/Test-Kit.ps1
+      - name: Parse and byte-check shipped scripts
+        shell: powershell
+        run: |
+          Get-ChildItem poc/automated/*.ps1 | ForEach-Object {
+            $tokens = $null; $errors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors)
+            if ($errors.Count) { throw ($errors | Out-String) }
+            if (@([IO.File]::ReadAllBytes($_.FullName) | Where-Object { $_ -gt 127 }).Count) { throw 'Non-ASCII PS1' }
+          }
+          $text = [IO.File]::ReadAllText((Resolve-Path poc/automated/Run-EsetHipsPoc.bat))
+          if ($text.Replace("`r`n", '').Contains("`n")) { throw 'BAT requires CRLF' }
+      - name: Publish and smoke-test harmless executable
+        shell: powershell
+        run: |
+          dotnet publish poc/LolrmmEsetTest/LolrmmEsetTest.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o artifacts/publish
+          if ($LASTEXITCODE -ne 0) { throw 'dotnet publish failed' }
+          ./poc/tests/Test-LolrmmEsetTest.ps1 -ExecutablePath artifacts/publish/LolrmmEsetTest.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Executable smoke failed' }
+      - name: Package explicit allowlist and complete member hashes
+        shell: powershell
+        run: |
+          New-Item artifacts/kit -ItemType Directory | Out-Null
+          Copy-Item artifacts/publish/LolrmmEsetTest.exe artifacts/kit/
+          $names = @('Run-EsetHipsPoc.bat','Launch-Kit.ps1','Invoke-EsetHipsPoc.v2026-10-07.2.ps1','Kit.Helpers.ps1','README.md')
+          foreach ($name in $names) { Copy-Item (Join-Path poc/automated $name) artifacts/kit/ }
+          Copy-Item poc/OWNER-RUN.md artifacts/kit/
+          Set-Content artifacts/kit/PROVENANCE.txt -Encoding ASCII -Value @("Source SHA: $env:GITHUB_SHA", "Hosted Windows runner: $env:RUNNER_OS", 'Live ESET testing: NOT PERFORMED', 'Phase 1 architecture gate: UNVERIFIED')
+          $expected = @($names) + @('LolrmmEsetTest.exe','OWNER-RUN.md','PROVENANCE.txt')
+          $actual = @(Get-ChildItem artifacts/kit -File | ForEach-Object { $_.Name })
+          if ((@($expected | Sort-Object) -join '|') -cne (@($actual | Sort-Object) -join '|')) { throw 'Package member set differs from explicit allowlist' }
+          $manifest = Get-ChildItem artifacts/kit -File | Sort-Object Name | ForEach-Object { '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name }
+          Set-Content artifacts/kit/SHA256SUMS.txt -Value $manifest -Encoding ASCII
+          Compress-Archive -Path artifacts/kit/* -DestinationPath artifacts/LOLRMM-ESET-Phase1-Guided-v2026-10-07.2.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Phase1-Guided-${{ matrix.os }}
+          path: artifacts/LOLRMM-ESET-Phase1-Guided-v2026-10-07.2.zip
+          if-no-files-found: error
