@@ -1,10 +1,10 @@
 # Roadmap and phase gates
 
-**No phase is active.** This plan is staged in Kanban, unassigned, and must not dispatch until the owner explicitly starts Phase 0. Every phase is sequential; do not skip or parallelize across a gate.
+**Phase 0 research and independent review are complete.** Keep each subsequent phase behind its recorded Kanban dependency gate; do not skip the ESET POC.
 
 | Phase | Deliverable | Exit gate |
 |---|---|---|
-| 0 — Research | `docs/research.md`, official current ESET and LOLRMM findings, direct sources and unresolved questions | Owner accepts documented evidence and decides how to satisfy the real ESET POC environment without violating the no-agent-VM/live-install policy. |
+| 0 — Research | `docs/research.md`, official current ESET and LOLRMM findings, direct sources and unresolved questions | Citation/evidence verification passes, fresh-eyes review is reconciled, and the owner-run ESET test route is recorded in ADR 0001. |
 | 1 — ESET HIPS POC | Minimal C# POC under `poc/`, sanitized real-version fixtures, `docs/eset-hips-xml.md` | Programmatic export/merge/sign/import/re-export round trip succeeds; harmless executable is blocked and logged by ESET; managed rule is removable; unrelated configuration survives. If any part fails, stop. No downstream app work. |
 | 2 — ESET configuration library | Detection, version adapter, export/parse/rule ownership, signer, import, verify, backups | Unit tests against sanitized captured XML and explicit version support; unknown versions read-only. |
 | 3 — LOLRMM pipeline | HTTPS client, cache, defensive parser/normalizer, internal model, persistent selections | Unit tests cover schema evolution, malformed records, defaults, overrides, cache fallback. |
@@ -16,8 +16,8 @@
 
 ## Owner gates and unresolved decisions
 
-1. **Start gate:** explicitly authorize Phase 0. Setup request alone does not authorize it.
-2. **Test-environment gate:** before Phase 1, resolve the brief's request for an agent-created Windows VM versus the owner's standing policy that agents do not provision VMs/install live software. Preferred route is owner-provided/owner-run ESET test environment with hosted Windows CI for non-live tests; record the owner's actual choice before mutation.
+1. **Start gate:** satisfied; the owner explicitly authorized Phase 0.
+2. **Test-environment gate:** the owner selected an isolated owner-run Windows/ESET machine or VM. The agent prepares the POC kit and instructions; the owner runs the live ESET checks and returns sanitized rule evidence/results. Agents must not provision a VM or install/mutate live ESET.
 3. **Release gate:** select an open-source license before distribution. Do not guess one during setup.
 4. **Compatibility gate:** support only ESET consumer versions actually documented and validated; unknown major versions stay read-only.
 

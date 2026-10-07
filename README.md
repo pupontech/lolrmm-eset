@@ -1,6 +1,6 @@
 # LOLRMM → ESET
 
-**Status: project setup only — research and implementation have not started.**
+**Status: Phase 0 research drafted; independent review is underway. No application or ESET-rule code exists yet.**
 
 A planned open-source Windows utility to let a user review the public LOLRMM catalog, choose which RMM products should be blocked, and synchronize suitable indicators into native rules in locally installed consumer ESET HIPS.
 
@@ -13,9 +13,9 @@ ESET itself would enforce the rules. This application is not intended to remain 
 ## Current project status
 
 - Project brief, agent instructions, phase plan, local workspace, public GitHub repository, and Hermes Kanban tracking are set up.
-- Phase 0 research has **not** started. No ESET behavior is yet verified, no HIPS XML fixture exists, and no compatibility claims are made.
+- Phase 0 current-source research is complete; citation/evidence verification passes and the independent review findings were reconciled. No HIPS XML fixture or enforcement test exists, so compatibility is not claimed.
 - Phase 1's ESET configuration round-trip and enforcement POC is a hard gate. Full application development must not begin unless that POC passes.
-- A test-environment policy conflict is recorded in [ADR 0001](docs/decisions/0001-project-scope-and-gates.md): the source brief asks for an agent-created Windows VM, while the owner's standing workflow is hosted Windows CI plus owner-run live Windows testing. Resolve this before any ESET mutation.
+- The owner selected an isolated owner-run Windows/ESET test machine or VM for the POC. Agents will not provision VMs or install/mutate live ESET; see [ADR 0001](docs/decisions/0001-project-scope-and-gates.md).
 
 ## Intended scope
 
@@ -27,7 +27,7 @@ LOLRMM's structured catalog is the canonical list: <https://lolrmm.io/api/rmm_to
 
 - [Full project brief](docs/PROJECT_BRIEF.md)
 - [Phase plan and gates](docs/roadmap.md)
-- [Research record](docs/research.md) — pending Phase 0
+- [Research record](docs/research.md) — Phase 0 complete; ESET POC still pending
 - [ESET HIPS XML / POC evidence](docs/eset-hips-xml.md) — pending Phase 1
 - [Testing record](docs/testing.md) — pending implementation and owner validation
 - [Project decisions](docs/decisions/)

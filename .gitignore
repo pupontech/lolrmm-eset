@@ -38,6 +38,9 @@ catalog-cache.json
 *.key
 *.pem
 
+# Research snapshots are local-only until redistribution terms are confirmed
+research/evidence/lolrmm-rmm_tools-*.json
+
 # OS noise
 .DS_Store
 Thumbs.db
