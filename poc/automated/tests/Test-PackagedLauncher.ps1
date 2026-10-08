@@ -29,8 +29,10 @@ function Require([bool]$Good, [string]$Name, $Result) {
     Write-Output ('PACKAGED_LAUNCH_PASS: ' + $Name)
 }
 try {
-    Expand-Archive -LiteralPath $ZipPath -DestinationPath $folder
-    Expand-Archive -LiteralPath $ZipPath -DestinationPath $other
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $absoluteZip = (Resolve-Path -LiteralPath $ZipPath).ProviderPath
+    [IO.Compression.ZipFile]::ExtractToDirectory($absoluteZip, $folder)
+    [IO.Compression.ZipFile]::ExtractToDirectory($absoluteZip, $other)
     $r = Invoke-PackagedBat '-ValidateOnly'
     Require ($r.Exit -eq 0 -and $r.Text.Contains('PACKAGE_PREFLIGHT_PASS') -and $r.Text.Contains('VALIDATION_ONLY_PASS')) 'actual BAT default root, spaces, apostrophe, brackets' $r
     $slashPath = $other.Replace('\','/')
