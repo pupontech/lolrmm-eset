@@ -85,31 +85,35 @@ try {
     if ([IO.Directory]::GetAccessControl($dir,$sections).GetSecurityDescriptorSddlForm($sections) -cne $ownerBefore -or [IO.File]::GetAccessControl($file,$sections).GetSecurityDescriptorSddlForm($sections) -cne $fileOwnerBefore) { throw 'DACL update changed owner or group.' }
     if ([IO.File]::ReadAllText($file) -cne '<SyntheticFixture/>') { throw 'ACL update altered file content.' }
     $script:Checks = New-Object 'System.Collections.Generic.List[object]'
-    $controller = Get-ChildItem -LiteralPath (Split-Path $HelperPath -Parent) -Filter 'Invoke-EsetHipsPoc.v*.ps1' | Select-Object -First 1
+    # The v2026-10-08.4 controller spawns an elevated supervisor instead of
+    # running Export-Configuration. Exercise the supervisor's pre-export
+    # environment checks under the restricted token while refusing any actual
+    # ecmd execution.
+    $supervisor = Get-ChildItem -LiteralPath (Split-Path $HelperPath -Parent) -Filter 'Invoke-EsetHipsSupervisor.v*.ps1' | Select-Object -First 1
+    if ($null -eq $supervisor) { throw 'Invoke-EsetHipsSupervisor not found.' }
     $tokens=$null; $errors=$null
-    $ast=[System.Management.Automation.Language.Parser]::ParseFile($controller.FullName,[ref]$tokens,[ref]$errors)
-    $fn=$ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Export-Configuration'},$true)[0]
+    $ast=[System.Management.Automation.Language.Parser]::ParseFile($supervisor.FullName,[ref]$tokens,[ref]$errors)
+    $fn=$ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Invoke-ExportSnapshot'},$true)[0]
     Invoke-Expression $fn.Extent.Text
-    $script:Evidence=$dir; $script:Sid=$sid; $script:RunId=('0' * 32)
-    # Reproduce the pre-UAC export preparation while refusing any actual UAC/export.
+    $script:Sid=$sid
+    # Reproduce the pre-export preparation while refusing any actual ecmd run.
     # The mock must emit no pipeline value: a real missing Get-Process result is
     # empty, and the preflight's @(Get-Process).Count must stay 0. A function that
     # "returns" $null emits one null element and would fail the preflight instead.
     function Get-Process { <# missing process: no pipeline output #> }
-    function Start-Process { throw 'UAC_BOUNDARY_REACHED_NO_VENDOR_EXECUTED' }
     $boundary = $false; $boundaryError = $null; $boundaryErrorType = $null
-    try { Export-Configuration 'baseline' | Out-Null }
+    try { Invoke-ExportSnapshot -Folder $dir -CallerSid $sid -OutName 'baseline.xml' | Out-Null }
     catch {
         $boundaryError = [string]$_.Exception.Message
         $boundaryErrorType = $_.Exception.GetType().FullName
-        if ($boundaryError.Contains('UAC_BOUNDARY_REACHED_NO_VENDOR_EXECUTED')) { $boundary = $true }
+        if ($boundaryError.Contains('ESET Security ecmd.exe not found')) { $boundary = $true }
     }
     if (-not $boundary) {
         $actualError = $boundaryError
-        if (-not $actualError) { $actualError = 'no exception was raised before the UAC boundary' }
-        throw ('Production export preflight did not reach the UAC boundary under restricted token. Actual error: ' + $boundaryErrorType + ' - ' + $actualError)
+        if (-not $actualError) { $actualError = 'no exception was raised before the vendor executable check' }
+        throw ('Supervisor export preflight did not reach the vendor check under restricted token. Actual error: ' + $boundaryErrorType + ' - ' + $actualError)
     }
-    Write-Output 'ACL_RESTRICTED_PASS: first and 20 repeated folder/file updates; production export pre-UAC path reached.'
+    Write-Output 'ACL_RESTRICTED_PASS: first and 20 repeated folder/file updates; supervisor export pre-UAC path reached.'
 } finally {
     if ($token -ne [IntPtr]::Zero) { [AclRestrictedTokenProof]::End($token) }
     Remove-Item -LiteralPath $root -Recurse -Force
