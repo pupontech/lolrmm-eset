@@ -163,9 +163,11 @@ function Set-PrivateAcl {
     param([string]$Path, [string]$UserSid)
     if ($env:OS -ne 'Windows_NT') { throw 'Windows required for ACLs.' }
     $item = Get-Item -LiteralPath $Path -Force
-    $acl = Get-Acl -LiteralPath $Path
+    # Construct a fresh DACL-only descriptor. Do not round-trip Owner/Group/SACL
+    # through Set-Acl: that can request SeSecurityPrivilege on a limited token.
+    if ($item.PSIsContainer) { $acl = New-Object Security.AccessControl.DirectorySecurity }
+    else { $acl = New-Object Security.AccessControl.FileSecurity }
     $acl.SetAccessRuleProtection($true, $false)
-    foreach ($rule in @($acl.Access)) { [void]$acl.RemoveAccessRuleSpecific($rule) }
     $inherit = [Security.AccessControl.InheritanceFlags]::None
     if ($item.PSIsContainer) { $inherit = [Security.AccessControl.InheritanceFlags]'ContainerInherit,ObjectInherit' }
     foreach ($sid in @($UserSid, 'S-1-5-32-544')) {
@@ -173,10 +175,16 @@ function Set-PrivateAcl {
         $rule = New-Object Security.AccessControl.FileSystemAccessRule($identity, [Security.AccessControl.FileSystemRights]::FullControl, $inherit, [Security.AccessControl.PropagationFlags]::None, [Security.AccessControl.AccessControlType]::Allow)
         [void]$acl.AddAccessRule($rule)
     }
-    Set-Acl -LiteralPath $Path -AclObject $acl
-    $check = Get-Acl -LiteralPath $Path
-    if (-not $check.AreAccessRulesProtected -or @($check.Access).Count -ne 2) { throw 'Private ACL verification failed.' }
-    foreach ($rule in $check.Access) {
+    if ($item.PSIsContainer) {
+        [IO.Directory]::SetAccessControl($Path, $acl)
+        $check = [IO.Directory]::GetAccessControl($Path, [Security.AccessControl.AccessControlSections]::Access)
+    } else {
+        [IO.File]::SetAccessControl($Path, $acl)
+        $check = [IO.File]::GetAccessControl($Path, [Security.AccessControl.AccessControlSections]::Access)
+    }
+    $rules = @($check.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]))
+    if (-not $check.AreAccessRulesProtected -or $rules.Count -ne 2) { throw 'Private ACL verification failed.' }
+    foreach ($rule in $rules) {
         $sid = $rule.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value
         if ($sid -notin @($UserSid, 'S-1-5-32-544') -or $rule.AccessControlType -ne 'Allow' -or $rule.FileSystemRights -ne [Security.AccessControl.FileSystemRights]::FullControl -or $rule.InheritanceFlags -ne $inherit -or $rule.PropagationFlags -ne [Security.AccessControl.PropagationFlags]::None -or $rule.IsInherited) { throw 'Unexpected private ACL entry.' }
     }

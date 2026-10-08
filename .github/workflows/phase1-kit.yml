@@ -57,7 +57,7 @@ jobs:
         run: |
           New-Item artifacts/kit -ItemType Directory | Out-Null
           Copy-Item artifacts/publish/LolrmmEsetTest.exe artifacts/kit/
-          $names = @('Run-EsetHipsPoc.bat','Launch-Kit.ps1','Invoke-EsetHipsPoc.v2026-10-08.1.ps1','Kit.Helpers.ps1','README.md')
+          $names = @('Run-EsetHipsPoc.bat','Launch-Kit.ps1','Invoke-EsetHipsPoc.v2026-10-08.2.ps1','Kit.Helpers.ps1','README.md')
           foreach ($name in $names) { Copy-Item (Join-Path poc/automated $name) artifacts/kit/ }
           Copy-Item poc/OWNER-RUN.md artifacts/kit/
           Set-Content artifacts/kit/PROVENANCE.txt -Encoding ASCII -Value @("Source SHA: $env:GITHUB_SHA", "Hosted Windows runner: $env:RUNNER_OS", 'Live ESET testing: NOT PERFORMED', 'Phase 1 architecture gate: UNVERIFIED')
@@ -66,12 +66,12 @@ jobs:
           if ((@($expected | Sort-Object) -join '|') -cne (@($actual | Sort-Object) -join '|')) { throw 'Package member set differs from explicit allowlist' }
           $manifest = Get-ChildItem artifacts/kit -File | Sort-Object Name | ForEach-Object { '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name }
           Set-Content artifacts/kit/SHA256SUMS.txt -Value $manifest -Encoding ASCII
-          Compress-Archive -Path artifacts/kit/* -DestinationPath artifacts/LOLRMM-ESET-Phase1-Guided-v2026-10-08.1.zip
+          Compress-Archive -Path artifacts/kit/* -DestinationPath artifacts/LOLRMM-ESET-Phase1-Guided-v2026-10-08.2.zip
       - name: Exercise actual ZIP launcher on Windows PowerShell 5.1
         shell: powershell
-        run: ./poc/automated/tests/Test-PackagedLauncher.ps1 -ZipPath artifacts/LOLRMM-ESET-Phase1-Guided-v2026-10-08.1.zip
+        run: ./poc/automated/tests/Test-PackagedLauncher.ps1 -ZipPath artifacts/LOLRMM-ESET-Phase1-Guided-v2026-10-08.2.zip
       - uses: actions/upload-artifact@v4
         with:
           name: Phase1-Guided-${{ matrix.os }}
-          path: artifacts/LOLRMM-ESET-Phase1-Guided-v2026-10-08.1.zip
+          path: artifacts/LOLRMM-ESET-Phase1-Guided-v2026-10-08.2.zip
           if-no-files-found: error

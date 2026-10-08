@@ -75,10 +75,15 @@ try {
     $dir = Join-Path $root 'private evidence'
     [void][IO.Directory]::CreateDirectory($dir)
     $file = Join-Path $dir 'baseline.xml'
+    $sections = [Security.AccessControl.AccessControlSections]'Owner,Group'
+    $ownerBefore = [IO.Directory]::GetAccessControl($dir,$sections).GetSecurityDescriptorSddlForm($sections)
     Set-PrivateAcl $dir $sid
     [IO.File]::WriteAllText($file,'<SyntheticFixture/>')
+    $fileOwnerBefore = [IO.File]::GetAccessControl($file,$sections).GetSecurityDescriptorSddlForm($sections)
     Set-PrivateAcl $file $sid
     for ($i=0; $i -lt 20; $i++) { Set-PrivateAcl $dir $sid; Set-PrivateAcl $file $sid }
+    if ([IO.Directory]::GetAccessControl($dir,$sections).GetSecurityDescriptorSddlForm($sections) -cne $ownerBefore -or [IO.File]::GetAccessControl($file,$sections).GetSecurityDescriptorSddlForm($sections) -cne $fileOwnerBefore) { throw 'DACL update changed owner or group.' }
+    if ([IO.File]::ReadAllText($file) -cne '<SyntheticFixture/>') { throw 'ACL update altered file content.' }
     $script:Checks = New-Object 'System.Collections.Generic.List[object]'
     $controller = Get-ChildItem -LiteralPath (Split-Path $HelperPath -Parent) -Filter 'Invoke-EsetHipsPoc.v*.ps1' | Select-Object -First 1
     $tokens=$null; $errors=$null

@@ -2,6 +2,12 @@
 
 **This is a runnable evidence-preparation kit, not a fully automated blocking utility.** It automates integrity checks, local folders, configuration exports, non-elevated process execution and reports. Creating/removing the exact test rule and confirming its HIPS log entry still require the owner. No ESET configuration import or UI automation is implemented. No consumer product/version is yet certified supported.
 
+## ACL privilege repair - v2026-10-08.2
+
+The owner reached a normal-user baseline launch, then failed with `SeSecurityPrivilege` during export preparation. Windows 2022 and 2025 CI reproduced the same exception at the old `Set-Acl` call under an effective token with administrator membership disabled and SeSecurityPrivilege absent. The previous elevated CI tests had missed this normal-user requirement.
+
+The replacement constructs a fresh access-permissions-only descriptor and persists it with the .NET Framework file/directory APIs. Verification explicitly reads only `AccessControlSections.Access`. Owner, group and audit settings are not rewritten; neither security privileges nor whole-controller elevation are requested. CI checks first and repeated folder/file permission updates and the actual production pre-UAC preparation path under the restricted token, with owner/group/content preservation assertions. Live ESET export is still an owner test.
+
 ## Path handling repair - v2026-10-08.1
 
 The old guard rejected valid forward-slash Windows drive paths and any ordinary folder containing cloud-provider words as a substring. Both failures were reproduced. The new guard accepts Windows separator variants, checks cloud names at directory-component boundaries, preserves configured sync-root/reparse/wildcard protections and identifies the exact failing path role/reason with user details redacted. The actual owner-side rejected path was not supplied, so the precise cause of that particular run remains unknown.

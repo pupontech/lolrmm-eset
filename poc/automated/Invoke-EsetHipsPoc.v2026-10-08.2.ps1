@@ -29,8 +29,10 @@ function Save-Evidence {
     $share | Set-Content -LiteralPath (Join-Path $script:Evidence 'run-status.txt') -Encoding ASCII
 }
 function Export-Configuration([string]$ExportStage) {
+    Write-Host ('EXPORT STEP: private access-permission check for ' + $ExportStage)
     [void](Assert-SafeLocalPath $script:Evidence 'Private evidence directory')
     Set-PrivateAcl $script:Evidence $script:Sid
+    Write-Host 'EXPORT STEP: private permissions verified; preparing UAC export worker.'
     if (@(Get-Process -Name ecmd -ErrorAction SilentlyContinue).Count -gt 0) { throw 'ecmd still running; configuration state unknown. No concurrent export attempted.' }
     $arguments = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$PSCommandPath,'-Worker','-RunId',$script:RunId,'-CallerSid',$script:Sid,'-Stage',$ExportStage)
     $line = (@($arguments | ForEach-Object { ConvertTo-NativeArgument $_ }) -join ' ')
