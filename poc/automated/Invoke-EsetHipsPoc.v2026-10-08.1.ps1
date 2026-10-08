@@ -29,7 +29,7 @@ function Save-Evidence {
     $share | Set-Content -LiteralPath (Join-Path $script:Evidence 'run-status.txt') -Encoding ASCII
 }
 function Export-Configuration([string]$ExportStage) {
-    [void](Assert-SafeLocalPath $script:Evidence)
+    [void](Assert-SafeLocalPath $script:Evidence 'Private evidence directory')
     Set-PrivateAcl $script:Evidence $script:Sid
     if (@(Get-Process -Name ecmd -ErrorAction SilentlyContinue).Count -gt 0) { throw 'ecmd still running; configuration state unknown. No concurrent export attempted.' }
     $arguments = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$PSCommandPath,'-Worker','-RunId',$script:RunId,'-CallerSid',$script:Sid,'-Stage',$ExportStage)
@@ -45,7 +45,7 @@ function Export-Configuration([string]$ExportStage) {
     return $path
 }
 function Test-HarmlessLaunch {
-    [void](Assert-SafeLocalPath $script:Exe)
+    [void](Assert-SafeLocalPath $script:Exe 'Copied test executable')
     if ((Get-FileHash -LiteralPath $script:Exe -Algorithm SHA256).Hash.ToLowerInvariant() -cne $script:ExpectedExeHash) { throw 'Test executable changed since package verification.' }
     return (Invoke-CapturedProcess -FilePath $script:Exe -TimeoutSeconds 15 -KillOnTimeout)
 }
@@ -99,26 +99,20 @@ try {
     $os = Get-CimInstance Win32_OperatingSystem
     if ($computer.PartOfDomain -or $os.ProductType -ne 1) { throw 'Domain-joined or server machine refused; use an isolated client test PC.' }
     if (-not $IAmOnATestMachine) { throw 'Explicit -IAmOnATestMachine acknowledgment required; use Launch-Kit.ps1 for typed consent.' }
-    $kit = Assert-SafeLocalPath $KitDir
-    $required = @('Run-EsetHipsPoc.bat','Launch-Kit.ps1','Invoke-EsetHipsPoc.v2026-10-07.2.ps1','Kit.Helpers.ps1','README.md','OWNER-RUN.md','PROVENANCE.txt','LolrmmEsetTest.exe')
-    $actual = @(Get-ChildItem -LiteralPath $kit -File | Where-Object { $_.Name -ne 'SHA256SUMS.txt' } | ForEach-Object { $_.Name })
-    if ((@($required | Sort-Object) -join '|') -cne (@($actual | Sort-Object) -join '|')) { throw 'Extract a fresh complete package; root member set unexpected.' }
-    $manifest = ConvertFrom-SafeManifest ([IO.File]::ReadAllText((Join-Path $kit 'SHA256SUMS.txt'))) $required
-    foreach ($name in $required) {
-        $path = Assert-SafeLocalPath (Join-Path $kit $name)
-        if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne $manifest[$name]) { throw ('Hash mismatch: ' + $name) }
-    }
+    $verified = Test-KitIntegrity -KitDir $KitDir -ControllerName ([IO.Path]::GetFileName($PSCommandPath))
+    $kit = $verified.KitPath
+    $manifest = $verified.Manifest
     Add-Check 'package-integrity' 'PASS' 'Exact member set and SHA256 hashes match; internal consistency, not publisher authentication.'
     $script:RunId = [guid]::NewGuid().ToString('N')
-    $runRoot = Assert-SafeLocalPath (Join-Path $env:LOCALAPPDATA 'LOLRMM-POC')
-    $evidenceRoot = Assert-SafeLocalPath (Join-Path $env:USERPROFILE 'LOLRMM-Evidence')
+    $runRoot = Assert-SafeLocalPath (Join-Path $env:LOCALAPPDATA 'LOLRMM-POC') 'Private run root'
+    $evidenceRoot = Assert-SafeLocalPath (Join-Path $env:USERPROFILE 'LOLRMM-Evidence') 'Private evidence root'
     foreach ($root in @($runRoot,$evidenceRoot)) { [void](New-Item -ItemType Directory -Path $root -Force) }
     $runFolder = Join-Path $runRoot $script:RunId
     $script:Evidence = Join-Path $evidenceRoot $script:RunId
     [void](New-Item -ItemType Directory -Path $runFolder)
     [void](New-Item -ItemType Directory -Path $script:Evidence)
     Set-PrivateAcl $runFolder $script:Sid; Set-PrivateAcl $script:Evidence $script:Sid
-    [void](Assert-SafeLocalPath $runFolder); [void](Assert-SafeLocalPath $script:Evidence)
+    [void](Assert-SafeLocalPath $runFolder); [void](Assert-SafeLocalPath $script:Evidence 'Private evidence directory')
     $script:ExpectedExeHash = $manifest['LolrmmEsetTest.exe']
     $script:Exe = Join-Path $runFolder 'LolrmmEsetTest.exe'
     Copy-Item -LiteralPath (Join-Path $kit 'LolrmmEsetTest.exe') -Destination $script:Exe

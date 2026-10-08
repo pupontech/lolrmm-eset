@@ -98,23 +98,66 @@ function Get-OverallTruth {
     if ($Statuses -contains 'FAIL') { $value = 'FAIL' }
     return [pscustomobject]@{ Overall = $value }
 }
-function Assert-SafeLocalPath {
+function Get-LocalPathGuardReason {
+    param([AllowEmptyString()][string]$Path)
+    if ([string]::IsNullOrWhiteSpace($Path)) { return 'empty-path' }
+    if ($Path -notmatch '^[A-Za-z]:[\\/]') { return 'not-an-absolute-local-drive-path' }
+    if ($Path -match '[*?]' -or $Path -match '[\x00-\x1f]' -or $Path.Substring(2).Contains(':')) { return 'wildcard-control-character-or-alternate-stream' }
+    # A substring in an ordinary filename is not evidence of cloud storage.
+    if ($Path -match '(^|[\\/])(OneDrive(?: - [^\\/]+)?|Dropbox|Google Drive|iCloud|iCloudDrive|iCloud Drive)([\\/]|$)') { return 'cloud-storage-path-component' }
+    return ''
+}
+function Format-PathForDiagnostic {
     param([string]$Path)
-    if ($Path -notmatch '^[A-Za-z]:\\' -or $Path -match '[*?]' -or $Path -match 'OneDrive|Dropbox|Google Drive|iCloud') { throw 'Unsafe local path.' }
-    $full = [IO.Path]::GetFullPath($Path)
+    $shown = $Path
+    foreach ($pair in @(@($env:USERPROFILE, '<USERPROFILE>'), @($env:USERNAME, '<USER>'), @($env:COMPUTERNAME, '<MACHINE>'))) {
+        if ($pair[0]) { $shown = [regex]::Replace($shown, [regex]::Escape($pair[0]), $pair[1], [Text.RegularExpressions.RegexOptions]::IgnoreCase) }
+    }
+    return $shown
+}
+function Assert-SafeLocalPath {
+    param([string]$Path, [string]$Label = 'local')
+    $reason = Get-LocalPathGuardReason $Path
+    if ($reason) { throw ($Label + ' path rejected [' + $reason + ']: ' + (Format-PathForDiagnostic $Path)) }
+    # Windows accepts forward slashes; normalize before checking ancestors.
+    $full = [IO.Path]::GetFullPath($Path.Replace('/', '\'))
+    $reason = Get-LocalPathGuardReason $full
+    if ($env:OS -eq 'Windows_NT' -and $reason) { throw ($Label + ' normalized path rejected [' + $reason + ']: ' + (Format-PathForDiagnostic $full)) }
+    if ($env:OS -eq 'Windows_NT') {
+        $drive = New-Object IO.DriveInfo($full.Substring(0, 3))
+        if ($drive.DriveType -eq [IO.DriveType]::Network) { throw ($Label + ' path rejected [mapped-network-drive]: ' + (Format-PathForDiagnostic $full)) }
+    }
     $part = $full
     while ($part) {
         if (Test-Path -LiteralPath $part) {
             $item = Get-Item -LiteralPath $part -Force
-            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Reparse path component rejected.' }
+            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw ($Label + ' path rejected [reparse-point-component]: ' + (Format-PathForDiagnostic $part)) }
         }
         $parent = [IO.Path]::GetDirectoryName($part)
         if ($parent -eq $part) { break }; $part = $parent
     }
     foreach ($sync in @($env:OneDrive, $env:OneDriveConsumer, $env:OneDriveCommercial)) {
-        if ($sync -and $full.StartsWith(($sync.TrimEnd('\') + '\'), [StringComparison]::OrdinalIgnoreCase)) { throw 'Synced location rejected.' }
+        if ($sync) {
+            $syncRoot = $sync.Replace('/', '\').TrimEnd('\')
+            if ($full.Equals($syncRoot, [StringComparison]::OrdinalIgnoreCase) -or $full.StartsWith(($syncRoot + '\'), [StringComparison]::OrdinalIgnoreCase)) { throw ($Label + ' path rejected [configured-sync-root]: ' + (Format-PathForDiagnostic $full)) }
+        }
     }
     return $full
+}
+function Test-KitIntegrity {
+    param([string]$KitDir, [string]$ControllerName)
+    $kit = Assert-SafeLocalPath $KitDir 'Kit directory'
+    if (-not (Test-Path -LiteralPath $kit -PathType Container)) { throw 'Kit directory does not exist; extract the complete ZIP first.' }
+    if ($ControllerName -cnotmatch '^Invoke-EsetHipsPoc\.v\d{4}-\d{2}-\d{2}\.\d+\.ps1$') { throw 'Unexpected controller filename.' }
+    $required = @('Run-EsetHipsPoc.bat','Launch-Kit.ps1',$ControllerName,'Kit.Helpers.ps1','README.md','OWNER-RUN.md','PROVENANCE.txt','LolrmmEsetTest.exe')
+    $actual = @(Get-ChildItem -LiteralPath $kit -File -Force | Where-Object { $_.Name -ne 'SHA256SUMS.txt' } | ForEach-Object { $_.Name })
+    if ((@($required | Sort-Object) -join '|') -cne (@($actual | Sort-Object) -join '|')) { throw 'Root member set unexpected; extract a fresh ZIP, do not overlay older kits.' }
+    $manifest = ConvertFrom-SafeManifest ([IO.File]::ReadAllText((Join-Path $kit 'SHA256SUMS.txt'))) $required
+    foreach ($name in $required) {
+        $path = Assert-SafeLocalPath (Join-Path $kit $name) ('Package member ' + $name)
+        if ((Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne $manifest[$name]) { throw ('Package hash mismatch: ' + $name) }
+    }
+    return [pscustomobject]@{ KitPath=$kit; Manifest=$manifest }
 }
 function Set-PrivateAcl {
     param([string]$Path, [string]$UserSid)
