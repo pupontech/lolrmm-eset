@@ -26,6 +26,9 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '10.0.x'
+      - name: Exercise ACL setup without administrator membership or SeSecurityPrivilege
+        shell: powershell
+        run: ./poc/automated/tests/Test-RestrictedAcl.ps1
       - name: Test helpers with Windows PowerShell 5.1
         shell: powershell
         run: |
