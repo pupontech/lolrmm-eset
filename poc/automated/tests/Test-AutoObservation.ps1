@@ -88,12 +88,21 @@ Assert ((Test-RuleAppearance $baselineFile $candidateFile $ruleName) -eq 'absent
 [IO.File]::WriteAllText($candidateFile, $withDup)
 Assert ((Test-RuleAppearance $baselineFile $candidateFile $ruleName) -eq 'unexpected') 'appearance: duplicate name collision unexpected'
 
-# Rule removal: byte identity
+# Rule removal: structural identity after volatile-counter stripping
 $removalFile = Join-Path ([IO.Path]::GetTempPath()) ('lolrmm-r-' + [guid]::NewGuid().ToString('N') + '.xml')
 [IO.File]::WriteAllText($removalFile, $baseline)
-Assert ((Test-RuleRemoval $baselineFile $removalFile) -eq 'done') 'removal: byte-identical is done'
+Assert ((Test-RuleRemoval $baselineFile $removalFile $ruleName) -eq 'done') 'removal: structurally identical is done'
 [IO.File]::WriteAllText($removalFile, $withOneRule)
-Assert ((Test-RuleRemoval $baselineFile $removalFile) -eq 'pending') 'removal: not-yet-identical is pending'
+Assert ((Test-RuleRemoval $baselineFile $removalFile $ruleName) -eq 'pending') 'removal: rule still present is pending'
+# Volatile counters churn but the structure is the baseline structure -> done
+$volatileBaseline = '<CONFIG><Rule name="x" HitCount="3" LastUseTime="t1"/></CONFIG>'
+$volatileCandidate = '<CONFIG><Rule name="x" HitCount="9" LastUseTime="t9"/></CONFIG>'
+$vb = Join-Path ([IO.Path]::GetTempPath()) ('lolrmm-vb-' + [guid]::NewGuid().ToString('N') + '.xml')
+$vc = Join-Path ([IO.Path]::GetTempPath()) ('lolrmm-vc-' + [guid]::NewGuid().ToString('N') + '.xml')
+[IO.File]::WriteAllText($vb, $volatileBaseline)
+[IO.File]::WriteAllText($vc, $volatileCandidate)
+Assert ((Test-RuleRemoval $vb $vc $ruleName) -eq 'done') 'removal: volatile counter churn alone does not block removal'
+Remove-Item -LiteralPath $vb, $vc -Force -ErrorAction SilentlyContinue
 
 # Cleanup temp files
 foreach ($f in @($baselineFile, $candidateFile, $removalFile)) { Remove-Item -LiteralPath $f -Force -ErrorAction SilentlyContinue }

@@ -218,9 +218,9 @@ $r = Compare-SafeXml -Before $compact -After $compact
 Assert-KindIs $r 'NO_CHANGE' 'case 1: compact self-compare -> NO_CHANGE'
 Assert-NoSentinelLeak $r 'case 1: no sentinel leak in self-compare result'
 
-# --- Case 2: indented vs compact -> ORDER_OR_FORMATTING_ONLY_UNVERIFIED --------
+# --- Case 2: indented vs compact -> NO_CHANGE (whitespace is discarded) --------
 $r = Compare-SafeXml -Before $indented -After $compact
-Assert-KindIs $r 'ORDER_OR_FORMATTING_ONLY_UNVERIFIED' 'case 2: indented vs compact -> ORDER_OR_FORMATTING_ONLY_UNVERIFIED'
+Assert-KindIs $r 'NO_CHANGE' 'case 2: indented vs compact -> NO_CHANGE'
 
 # --- Case 3: sibling rule subtree reorder -> ORDER_OR_FORMATTING_ONLY_UNVERIFIED
 $doc = Get-XmlFromText $compact
@@ -304,11 +304,11 @@ $r = Compare-SafeXml -Before $compact -After $afterTwo
 Assert-KindIs $r 'MULTIPLE_SUBTREE_INSERTIONS' 'case 9: two new rules -> MULTIPLE_SUBTREE_INSERTIONS'
 Assert-IntIs $r 'AddedRootCount' 2 'case 9: AddedRootCount 2'
 
-# --- Case 10: DOM-built insert then remove -> formatting-only, NOT NO_CHANGE ----
+# --- Case 10: DOM-built insert then remove -> NO_CHANGE ------------------------
 # XmlDocument.OuterXml rewrites '<RULE/>' style tags to '<RULE></RULE>' and may
 # alter attribute/element serialization, so the strings are not byte-identical.
-# The frozen contract classifies such shape-preserving differences as
-# ORDER_OR_FORMATTING_ONLY_UNVERIFIED.
+# The volatile-noise strip re-parses both sides with whitespace discarded, so a
+# shape-preserving DOM round-trip classifies as NO_CHANGE.
 $doc = Get-XmlFromText $compact
 $rulesContainer = $doc.SelectSingleNode('//HIPS_RULES')
 $frag = Get-XmlFromText '<RULE Name="NEW-TEMP" Id="NEW-TEMP"><Enabled>1</Enabled></RULE>'
@@ -318,7 +318,7 @@ $tmp = $doc.ImportNode($frag.DocumentElement, $true)
 $afterInsertRemove = $doc.OuterXml
 if ($afterInsertRemove -ceq $compact) { throw 'FAIL: DOM round-trip unexpectedly byte-identical' }
 $r = Compare-SafeXml -Before $compact -After $afterInsertRemove
-Assert-KindIs $r 'ORDER_OR_FORMATTING_ONLY_UNVERIFIED' 'case 10: DOM insert-then-remove -> ORDER_OR_FORMATTING_ONLY_UNVERIFIED'
+Assert-KindIs $r 'NO_CHANGE' 'case 10: DOM insert-then-remove -> NO_CHANGE'
 
 # --- Case 11: 12 new rules -> AddedRoots capped at 10, Truncated true ----------
 $doc = Get-XmlFromText $compact

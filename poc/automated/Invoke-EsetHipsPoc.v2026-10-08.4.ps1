@@ -218,7 +218,7 @@ try {
         if (-not (Wait-ForVerdictFile -Name 'removed-verdict' -TimeoutSeconds $RemovalTimeoutSeconds)) {
             throw 'Removal was not proven within the wait window. Manual inspection of the test rule is required.'
         }
-        Add-Check 'rule-removal-machine-verified' 'PASS' 'After-removal export byte-identical to the private baseline; removal proven without owner confirmation.'
+        Add-Check 'rule-removal-machine-verified' 'PASS' 'After-removal export structurally identical to the private baseline once volatile usage counters are stripped; removal proven without owner confirmation.'
         $script:Report.cleanup_unresolved = $false
         Assert-HarmlessSuccess (Test-HarmlessLaunch)
         Add-Check 'cleanup-preservation' 'PASS' 'Post-removal executable restored to exact expected stdout/exit 0.'

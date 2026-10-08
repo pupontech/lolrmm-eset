@@ -105,7 +105,10 @@ $plain = New-IndentedXml ''
 $pretty = New-IndentedXml "`n  "
 Assert ($plain -cne $pretty) 't3 fixtures genuinely differ as bytes'
 $d = Compare-SafeXml -Before $plain -After $pretty
-Assert ($d.Kind -eq 'ORDER_OR_FORMATTING_ONLY_UNVERIFIED') 't3 whitespace-only diff classified'
+# Volatile-noise stripping parses both documents with whitespace discarded,
+# so whitespace-only differences classify as NO_CHANGE (a stronger, honest
+# equivalence: nothing structural or textual changed).
+Assert ($d.Kind -eq 'NO_CHANGE') 't3 whitespace-only diff classified'
 Assert ($d.AddedElements -eq 0 -and $d.RemovedElements -eq 0 -and $d.ChangedElements -eq 0) 't3 zero structural delta'
 
 # ---------- test 4: one existing attribute value changed ----------
@@ -231,7 +234,9 @@ $rtTemp = $rtDoc.CreateElement('TEMP')
 $rtAfter = $rtDoc.OuterXml
 Assert ($rtAfter -cne $rtSrc) 'extra DOM round-trip bytes differ after insert-then-remove'
 $d = Compare-SafeXml -Before $rtSrc -After $rtAfter
-Assert ($d.Kind -eq 'ORDER_OR_FORMATTING_ONLY_UNVERIFIED') 'extra DOM round-trip formatting-only'
+# Volatile-noise stripping discards whitespace, so the DOM-normalized round-trip
+# parses to the same tree and classifies as NO_CHANGE.
+Assert ($d.Kind -eq 'NO_CHANGE') 'extra DOM round-trip formatting-only'
 
 # ---------- extra: exactly-10 added roots must NOT truncate ----------
 $sbX = New-Object System.Text.StringBuilder

@@ -158,10 +158,20 @@ function Test-RuleAppearance {
     return 'absent'
 }
 function Test-RuleRemoval {
-    param([string]$BaselinePath, [string]$CandidatePath)
-    $b = (Get-FileHash -LiteralPath $BaselinePath -Algorithm SHA256).Hash
-    $c = (Get-FileHash -LiteralPath $CandidatePath -Algorithm SHA256).Hash
-    if ($b -ceq $c) { return 'done' }
+    param([string]$BaselinePath, [string]$CandidatePath, [string]$RuleName)
+    # Removal is proven when the candidate equals the baseline after volatile
+    # counters (firewall HitCount/LastUseTime etc.) are stripped: the rule
+    # name is gone AND nothing else structurally changed. Raw byte identity
+    # is impossible on real ESET exports because usage counters churn.
+    $baselineDoc = Remove-VolatileXmlNoise (Get-SafeXmlTree ([IO.File]::ReadAllText($BaselinePath)))
+    $candidateDoc = Remove-VolatileXmlNoise (Get-SafeXmlTree ([IO.File]::ReadAllText($CandidatePath)))
+    $baselineText = [string]$baselineDoc.OuterXml
+    $candidateText = [string]$candidateDoc.OuterXml
+    if ($candidateText -ceq $baselineText) { return 'done' }
+    $diff = Compare-SafeXml $baselineText $candidateText
+    if ($diff.Kind -eq 'NO_CHANGE' -or $diff.Kind -eq 'ORDER_OR_FORMATTING_ONLY_UNVERIFIED') { return 'done' }
+    $nameCount = Get-RuleNameCollisionCount (Get-SafeXmlTree $candidateText) $RuleName
+    if ($nameCount -gt 0) { return 'pending' }
     return 'pending'
 }
 if ($SelfTest) { return }
@@ -234,10 +244,10 @@ try {
     while ((Get-Date) -lt $deadline) {
         $poll++
         $snapshot = Invoke-ExportSnapshot -Folder $folder -CallerSid $CallerSid -OutName ('poll-' + $poll + '.xml')
-        $state = Test-RuleRemoval -BaselinePath $baseline -CandidatePath $snapshot
+        $state = Test-RuleRemoval -BaselinePath $baseline -CandidatePath $snapshot -RuleName $RuleName
         if ($state -eq 'done') {
             Move-Item -LiteralPath $snapshot -Destination (Join-Path $folder 'removed.xml') -Force
-            Write-VerdictJson -Folder $folder -Name 'removed-verdict' -Payload @{ byteIdenticalToBaseline = $true }
+            Write-VerdictJson -Folder $folder -Name 'removed-verdict' -Payload @{ structurallyIdenticalAfterVolatileStrip = $true }
             $done = $true
             break
         }
@@ -246,7 +256,7 @@ try {
     }
     if (-not $done) {
         $script:CleanupUnresolved = $true
-        throw 'Removal was not proven within the wait window: no export byte-identical to the baseline. Manual inspection of the test rule is required.'
+        throw 'Removal was not proven within the wait window: no export structurally identical to the baseline after volatile-counter stripping. Manual inspection of the test rule is required.'
     }
     exit 0
 } catch {

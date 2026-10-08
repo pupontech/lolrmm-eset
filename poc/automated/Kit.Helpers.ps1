@@ -57,6 +57,40 @@ function Get-XmlFingerprint {
 # no XPath, no element-count cap. Classifies a structural candidate only;
 # it does NOT prove HIPS semantics or ownership.
 # ---------------------------------------------------------------------------
+function Remove-VolatileXmlNoise {
+    # ESET rewrites volatile counters (firewall HitCount/LastUseTime and
+    # similar usage statistics) on every configuration export, even when the
+    # owner changed nothing. A structural comparison must ignore them or every
+    # real run classifies as UNEXPLAINED_DIFFERENCE. This filter REMOVES such
+    # attributes and pure-counter elements on a parsed copy; the caller diffs
+    # the filtered copy of both documents. Never used for the sanitized diff
+    # OUTPUT (which only carries element/attribute NAMES anyway).
+    param([System.Xml.XmlDocument]$Doc)
+    $volatileAttrPattern = '^(hitcount|lastusetime|lastused|lastrun|lastscan|lastupdate|firstseen|createdat|modifiedat|modified|updatedat|timestamp|usagetime|timesused)$'
+    $volatileElementPattern = '^(hitcount|lastusetime|lastused|lastrun|lastscan|lastupdate|firstseen|createdat|modifiedat|timestamp|usagetime|timesused)$'
+    $toRemoveAttr = New-Object 'System.Collections.Generic.List[object]'
+    $toRemoveEl = New-Object 'System.Collections.Generic.List[object]'
+    foreach ($el in $Doc.SelectNodes('//*')) {
+        if ($null -ne $el.Attributes) {
+            foreach ($attr in $el.Attributes) {
+                if ([string]$attr.Name -imatch $volatileAttrPattern) { [void]$toRemoveAttr.Add($attr) }
+            }
+        }
+        # A counter ELEMENT with no element children and short numeric-ish
+        # text is also noise (e.g. <HitCount>12</HitCount>).
+        $local = [string]$el.LocalName
+        if ($local -imatch $volatileElementPattern) {
+            $hasElementChild = $false
+            foreach ($child in $el.ChildNodes) {
+                if ($child.NodeType -eq [System.Xml.XmlNodeType]::Element) { $hasElementChild = $true; break }
+            }
+            if (-not $hasElementChild) { [void]$toRemoveEl.Add($el) }
+        }
+    }
+    foreach ($attr in $toRemoveAttr) { [void]$attr.OwnerElement.Attributes.RemoveNamedItem($attr.Name) }
+    foreach ($el in $toRemoveEl) { if ($null -ne $el.ParentNode) { [void]$el.ParentNode.RemoveChild($el) } }
+    return $Doc
+}
 function Get-SelfFingerprintString {
     # Node type + localName + namespaceURI + sorted attribute name/value pairs
     # + concatenated direct child text/CDATA/comment values, EXCLUDING child
@@ -152,32 +186,21 @@ function Get-XmlContextHashes {
 }
 function Compare-SafeXml {
     param([string]$Before, [string]$After)
-    if ($Before -ceq $After) {
-        # Byte-identical: parse once so element totals stay honest.
-        $sameDoc = Get-SafeXmlTree $Before
-        $elementCount = 0
-        $countStack = New-Object 'System.Collections.Generic.List[object]'
-        [void]$countStack.Add($sameDoc.DocumentElement)
-        while ($countStack.Count -gt 0) {
-            $last = $countStack.Count - 1
-            $current = [System.Xml.XmlElement]$countStack[$last]
-            $countStack.RemoveAt($last)
-            $elementCount++
-            $childBuffer = New-Object 'System.Collections.Generic.List[System.Xml.XmlElement]'
-            foreach ($child in $current.ChildNodes) {
-                if ($child.NodeType -eq [System.Xml.XmlNodeType]::Element) { [void]$childBuffer.Add($child) }
-            }
-            for ($i = $childBuffer.Count - 1; $i -ge 0; $i--) { [void]$countStack.Add($childBuffer[$i]) }
-        }
+    # Volatile counters (firewall HitCount/LastUseTime etc.) are stripped from
+    # BOTH documents before any structural decision; ESET rewrites them on
+    # every export.
+    $x = Remove-VolatileXmlNoise (Get-SafeXmlTree $Before)
+    $y = Remove-VolatileXmlNoise (Get-SafeXmlTree $After)
+    if ($x.OuterXml -ceq $y.OuterXml) {
+        $elementCount = @($x.SelectNodes('//*')).Count
         return [pscustomobject]@{
             Kind = 'NO_CHANGE'
             AddedElements = 0; RemovedElements = 0; ChangedElements = 0
             AddedRootCount = 0; AddedRoots = @(); Truncated = $false
             ElementsBefore = $elementCount; ElementsAfter = $elementCount
+            LineHint = ''
         }
     }
-    $x = Get-SafeXmlTree $Before
-    $y = Get-SafeXmlTree $After
     $beforeData = Get-XmlContextHashes $x.DocumentElement
     $afterData = Get-XmlContextHashes $y.DocumentElement
     $beforeElements = $beforeData[0]; $beforeHashes = $beforeData[1]
@@ -351,7 +374,7 @@ function Test-KitIntegrity {
     $kit = Assert-SafeLocalPath $KitDir 'Kit directory'
     if (-not (Test-Path -LiteralPath $kit -PathType Container)) { throw 'Kit directory does not exist; extract the complete ZIP first.' }
     if ($ControllerName -cnotmatch '^Invoke-EsetHipsPoc\.v\d{4}-\d{2}-\d{2}\.\d+\.ps1$') { throw 'Unexpected controller filename.' }
-    $required = @('Run-EsetHipsPoc.bat','Launch-Kit.ps1',$ControllerName,'Kit.Helpers.ps1','README.md','OWNER-RUN.md','PROVENANCE.txt','LolrmmEsetTest.exe')
+    $required = @('Run-EsetHipsPoc.bat','Launch-Kit.ps1',$ControllerName,'Invoke-EsetHipsSupervisor.v2026-10-08.4.ps1','Kit.Helpers.ps1','README.md','OWNER-RUN.md','PROVENANCE.txt','LolrmmEsetTest.exe')
     $actual = @(Get-ChildItem -LiteralPath $kit -File -Force | Where-Object { $_.Name -ne 'SHA256SUMS.txt' } | ForEach-Object { $_.Name })
     if ((@($required | Sort-Object) -join '|') -cne (@($actual | Sort-Object) -join '|')) { throw 'Root member set unexpected; extract a fresh ZIP, do not overlay older kits.' }
     $manifest = ConvertFrom-SafeManifest ([IO.File]::ReadAllText((Join-Path $kit 'SHA256SUMS.txt'))) $required
