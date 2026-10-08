@@ -5,10 +5,9 @@ param(
     [ValidateSet('LOLRMM POC TEST - LolrmmEsetTest')][string]$RuleName = 'LOLRMM POC TEST - LolrmmEsetTest',
     [switch]$DryRun,
     [switch]$IAmOnATestMachine,
-    [switch]$Worker,
-    [string]$RunId,
-    [string]$CallerSid,
-    [ValidateSet('baseline','with-manual-rule','after-removal')][string]$Stage = 'baseline'
+    [int]$RuleAppearTimeoutSeconds = 1800,
+    [int]$RemovalTimeoutSeconds = 1800,
+    [int]$PollSeconds = 20
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'Kit.Helpers.ps1')
@@ -22,9 +21,10 @@ function Save-Evidence {
     $script:Report.status = (Get-OverallTruth @($script:Checks | ForEach-Object { $_.status })).Overall
     $script:Report.finished = (Get-Date).ToString('o')
     $script:Report | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $script:Evidence 'result.json') -Encoding UTF8
-    $share = @('LOLRMM ESET Phase 1 - guided observation', ('Overall: ' + $script:Report.status), 'Architecture gate: UNVERIFIED', ('Cleanup unresolved: ' + $script:Report.cleanup_unresolved), ('XML diff classification: ' + $script:XmlDiffKind))
+    $share = @('LOLRMM ESET Phase 1 - automated observation', ('Overall: ' + $script:Report.status), 'Architecture gate: UNVERIFIED', ('Cleanup unresolved: ' + $script:Report.cleanup_unresolved), ('XML diff classification: ' + $script:XmlDiffKind))
     if ($script:Checks) { foreach ($check in $script:Checks) { $share += ($check.name + ': ' + $check.status + ' - ' + $check.detail) } }
     $share += 'Raw XML and diagnostics are PRIVATE. Do not share result.json.'
+    $share += 'Send back ONLY RESULTS.txt and sanitized-rule-diff.txt.'
     $share | Set-Content -LiteralPath (Join-Path $script:Evidence 'RESULTS.txt') -Encoding ASCII
     if (-not $script:RuleDiffWritten) {
         @('No structural XML comparison was produced in this run. Raw XML is withheld.') | Set-Content -LiteralPath (Join-Path $script:Evidence 'sanitized-rule-diff.txt') -Encoding ASCII
@@ -61,23 +61,18 @@ function Save-SanitizedRuleDiff($Diff, [string]$BaselinePath, [string]$AfterPath
     $lines | Set-Content -LiteralPath (Join-Path $script:Evidence 'sanitized-rule-diff.txt') -Encoding ASCII
     $script:RuleDiffWritten = $true
 }
-function Export-Configuration([string]$ExportStage) {
-    Write-Host ('EXPORT STEP: private access-permission check for ' + $ExportStage)
+function Start-EsetHipsSupervisor {
+    # One UAC approval for the whole run: the elevated supervisor performs all
+    # exports and rule-state detection. Arguments are passed on the command
+    # line; every value is a run-scoped identifier, never a secret.
     [void](Assert-SafeLocalPath $script:Evidence 'Private evidence directory')
     Set-PrivateAcl $script:Evidence $script:Sid
-    Write-Host 'EXPORT STEP: private permissions verified; preparing UAC export worker.'
     if (@(Get-Process -Name ecmd -ErrorAction SilentlyContinue).Count -gt 0) { throw 'ecmd still running; configuration state unknown. No concurrent export attempted.' }
-    $arguments = @('-NoProfile','-ExecutionPolicy','Bypass','-File',$PSCommandPath,'-Worker','-RunId',$script:RunId,'-CallerSid',$script:Sid,'-Stage',$ExportStage)
+    $controller = Join-Path $PSScriptRoot ([IO.Path]::GetFileName($PSCommandPath))
+    $arguments = @('-NoProfile','-ExecutionPolicy','Bypass','-File',(Join-Path $PSScriptRoot 'Invoke-EsetHipsSupervisor.v2026-10-08.4.ps1'),'-RunId',$script:RunId,'-CallerSid',$script:Sid,'-RuleName',$RuleName,'-RuleAppearTimeoutSeconds',[string]$RuleAppearTimeoutSeconds,'-RemovalTimeoutSeconds',[string]$RemovalTimeoutSeconds,'-PollSeconds',[string]$PollSeconds)
     $line = (@($arguments | ForEach-Object { ConvertTo-NativeArgument $_ }) -join ' ')
-    $p = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList $line -Verb RunAs -Wait -PassThru
-    if ($null -eq $p -or $p.ExitCode -ne 0) { throw 'UAC export worker failed or was declined. See private worker status; no import attempted.' }
-    $path = Join-Path $script:Evidence ($ExportStage + '.xml')
-    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw 'Export worker did not produce its expected file.' }
-    $file = Get-Item -LiteralPath $path
-    if ($file.Length -eq 0 -or $file.Length -gt 16777216) { throw 'Export file empty or exceeds 16 MiB.' }
-    [void](Get-SafeXmlTree ([IO.File]::ReadAllText($path)))
-    Set-PrivateAcl $path $script:Sid
-    return $path
+    $p = Start-Process -FilePath (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -ArgumentList $line -Verb RunAs -PassThru
+    return $p
 }
 function Test-HarmlessLaunch {
     [void](Assert-SafeLocalPath $script:Exe 'Copied test executable')
@@ -87,39 +82,19 @@ function Test-HarmlessLaunch {
 function Assert-HarmlessSuccess($Outcome) {
     if ($Outcome.ExitCode -ne 0 -or $Outcome.Stdout.TrimEnd([char[]]@("`r","`n")) -cne 'Test Application' -or $Outcome.Stderr.Length -ne 0) { throw 'Harmless executable did not produce exact expected stdout, empty stderr and exit 0.' }
 }
-# Worker can only export to a fresh predetermined stage under this user's evidence run.
-if ($Worker) {
-    $workerStatus = $null
-    try {
-        if ($env:OS -ne 'Windows_NT') { throw 'Windows required.' }
-        $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
-        $principal = New-Object Security.Principal.WindowsPrincipal($identity)
-        if (-not $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) { throw 'Export worker is not elevated.' }
-        if ($identity.User.Value -cne $CallerSid) { throw 'UAC account differs from invoking account; refusing.' }
-        if ($RunId -cnotmatch '^[0-9a-f]{32}$') { throw 'Invalid run identifier.' }
-        $folder = Assert-SafeLocalPath (Join-Path (Join-Path $env:USERPROFILE 'LOLRMM-Evidence') $RunId)
-        if (-not (Test-Path -LiteralPath $folder -PathType Container)) { throw 'Evidence folder missing.' }
-        Set-PrivateAcl $folder $CallerSid
-        $workerStatus = Join-Path $folder ('worker-' + $Stage + '.json')
-        $ecmd = Assert-SafeLocalPath (Join-Path $env:ProgramFiles 'ESET\ESET Security\ecmd.exe')
-        if (-not (Test-Path -LiteralPath $ecmd -PathType Leaf)) { throw 'ESET Security ecmd.exe not found.' }
-        $sig = Get-AuthenticodeSignature -LiteralPath $ecmd
-        if ($sig.Status -ne 'Valid' -or $null -eq $sig.SignerCertificate -or $sig.SignerCertificate.Subject -notmatch 'ESET') { throw 'ecmd does not have a valid ESET Authenticode signature.' }
-        if (@(Get-Process -Name ecmd -ErrorAction SilentlyContinue).Count -gt 0) { throw 'Existing ecmd process; state unknown.' }
-        $dest = Join-Path $folder ($Stage + '.xml')
-        if (Test-Path -LiteralPath $dest) { throw 'Refusing to overwrite export.' }
-        $process = Invoke-CapturedProcess -FilePath $ecmd -ArgumentList @('/getcfg',$dest) -TimeoutSeconds 90
-        $process | ConvertTo-Json -Depth 3 | Set-Content -LiteralPath $workerStatus -Encoding UTF8
-        if ($process.ExitCode -ne 0 -or -not (Test-Path -LiteralPath $dest -PathType Leaf)) { throw 'ecmd export failed; details retained privately.' }
-        if ((Get-Item -LiteralPath $dest).Length -eq 0 -or (Get-Item -LiteralPath $dest).Length -gt 16777216) { throw 'Export empty or too large.' }
-        [void](Get-SafeXmlTree ([IO.File]::ReadAllText($dest)))
-        Set-PrivateAcl $dest $CallerSid
-        exit 0
-    } catch {
-        Write-Host ('EXPORT FAILED: ' + $_.Exception.Message) -ForegroundColor Red
-        if ($workerStatus) { @{ status='FAIL'; message=$_.Exception.Message } | ConvertTo-Json | Set-Content -LiteralPath $workerStatus -Encoding UTF8 }
-        exit 1
+function Read-VerdictJson([string]$Name) {
+    $path = Join-Path $script:Evidence ($Name + '.json')
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return $null }
+    return (ConvertFrom-Json ([IO.File]::ReadAllText($path)))
+}
+function Wait-ForVerdictFile {
+    param([string]$Name, [int]$TimeoutSeconds, [int]$PollSeconds = 2)
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    while ((Get-Date) -lt $deadline) {
+        if (Test-Path -LiteralPath (Join-Path $script:Evidence ($Name + '.json'))) { return $true }
+        Start-Sleep -Seconds $PollSeconds
     }
+    return $false
 }
 $script:Checks = New-Object 'System.Collections.Generic.List[object]'
 $script:Evidence = $null; $script:PotentialRule = $false; $script:Exe = $null
@@ -169,38 +144,56 @@ try {
     }
     Write-Host ('Detected Windows: ' + $os.Caption + ' build ' + $os.BuildNumber)
     Write-Host ('Detected ecmd FileVersion: ' + $script:Report.environment.ecmd_version)
-    if (-not (Confirm-Yes 'Confirm HIPS is enabled in ESET UI (unknown/no means stop)')) { throw 'HIPS not confirmed enabled; stopping.' }
-    Add-Check 'HIPS-readiness' 'OWNER_REPORTED' 'Owner confirmed HIPS enabled; not independently machine-verified.'
-    $mode = Read-Host 'ESET CMD authorization MODE only: None, Password, Disabled, Unknown (NEVER type a password)'
-    if ($mode -notin @('None','Password','Disabled','Unknown')) { throw 'Unexpected authorization mode input.' }
-    $script:Report.environment.ecmd_mode_owner_reported = $mode
-    Add-Check 'ESET-CMD-mode' 'OWNER_REPORTED' ('Mode=' + $mode + '; export allowed even when disabled; no import attempted.')
     if ($DryRun) {
         Add-Check 'dry-run' 'UNVERIFIED' 'Preflight and private folders completed; no export, executable launch or ESET change.'
     } else {
         Assert-HarmlessSuccess (Test-HarmlessLaunch)
         Add-Check 'baseline-launch' 'PASS' 'Non-elevated executable: exact Test Application, empty stderr, exit 0.'
-        $baseline = Export-Configuration 'baseline'
-        $script:Report.baseline_sha256 = (Get-FileHash $baseline -Algorithm SHA256).Hash
-        Add-Check 'baseline-export' 'PASS' 'Elevated ecmd export created securely parsed local baseline.'
-        Write-Host ('EXACT TEST EXE: ' + $script:Exe)
-        Write-Host ('MANUAL RULE: ' + $RuleName)
-        Write-Host 'Enabled; Block; Start new application; All source applications; Specific exact file target; logging + notification.'
-        Write-Host 'If a rule with this name already exists, STOP. Do not edit it or delete it.'
-        if (-not (Confirm-Yes 'Confirm there is NO pre-existing rule with this name')) { throw 'Rule-name collision or unknown ownership.' }
+        Write-Host ''
+        Write-Host '=================================================================='
+        Write-Host 'ONE-TIME CONSENT'
+        Write-Host '=================================================================='
+        Write-Host ('This run needs exactly TWO interactions from you:')
+        Write-Host ('  1) the UAC approval that follows (one elevation for all exports);')
+        Write-Host ('  2) creating ONE rule in the ESET HIPS UI when told, then removing')
+        Write-Host ('     it when told. No further typed answers; the kit watches the')
+        Write-Host ('     exported configuration to see your rule appear and disappear.')
+        Write-Host ('      Rule name : ' + $RuleName)
+        Write-Host ('      Settings  : Enabled; Block; Start new application; All source')
+        Write-Host ('                  applications; Specific exact file target =')
+        Write-Host ('                  ' + $script:Exe)
+        Write-Host ('                  logging + notification enabled.')
+        Write-Host 'If a rule with this name already exists, answer NO and stop.'
+        Write-Host ''
+        if (-not (Confirm-Yes 'Authorize this automated ESET observation now?')) { throw 'One-time consent declined; nothing was changed.' }
+        $supervisor = Start-EsetHipsSupervisor
+        if ($null -eq $supervisor) { throw 'UAC supervisor could not be started; no export performed.' }
+        if ($supervisor.HasExited -and $supervisor.ExitCode -ne 0) { throw 'UAC supervisor exited immediately; see private abort.json.' }
+        Write-Host ('Supervisor started (PID ' + $supervisor.Id + '). Waiting for the baseline verdict...')
+        if (-not (Wait-ForVerdictFile -Name 'baseline-verdict' -TimeoutSeconds 300)) {
+            throw 'Supervisor did not produce a baseline verdict in time. See abort.json if present.'
+        }
+        $verdict = Read-VerdictJson 'baseline-verdict'
+        if ($verdict.ruleNameCollisions -gt 0) { throw ('Rule-name collision detected in the exported configuration (' + $verdict.ruleNameCollisions + ' occurrence(s)). No rule was created by this kit.') }
+        if ($verdict.hips -ne 'enabled') { throw ('HIPS state machine-determined as ' + $verdict.hips + '; stopping before any rule work. Enable HIPS only with explicit owner intent, then rerun.') }
+        Add-Check 'hips-enabled-machine-check' 'UNVERIFIED' 'HIPS enablement machine-detected from the private baseline export; semantics still heuristic.'
+        Add-Check 'baseline-export' 'PASS' 'Elevated supervisor exported and safely parsed a private baseline configuration.'
         $script:PotentialRule = $true; $script:Report.cleanup_unresolved = $true
-        if (-not (Confirm-Yes 'Now create only that exact rule in ESET UI, then confirm complete (no/unknown triggers cleanup)')) { throw 'Manual creation not confirmed.' }
-        $withRule = Export-Configuration 'with-manual-rule'
-        $diff = Compare-SafeXml ([IO.File]::ReadAllText($baseline)) ([IO.File]::ReadAllText($withRule))
-        $script:XmlDiffKind = $diff.Kind
-        $script:Report.xml_diff = @{ kind=$diff.Kind; added=$diff.AddedElements; removed=$diff.RemovedElements; changed=$diff.ChangedElements; added_roots=$diff.AddedRootCount; elements_before=$diff.ElementsBefore; elements_after=$diff.ElementsAfter; truncated=$diff.Truncated }
-        Write-Host ('XML DIFF: ' + $diff.Kind + ' | elements ' + $diff.ElementsBefore + ' -> ' + $diff.ElementsAfter + ' | added=' + $diff.AddedElements + ' removed=' + $diff.RemovedElements + ' changed=' + $diff.ChangedElements + ' addedRoots=' + $diff.AddedRootCount)
-        Save-SanitizedRuleDiff $diff $baseline $withRule
-        if ($diff.Kind -eq 'STRUCTURAL_SINGLE_INSERTION_CANDIDATE') {
-            Add-Check 'single-rule-structure' 'UNVERIFIED' 'Exactly one added subtree root and nothing else changed; the ESET rule schema still requires review.'
+        Write-Host ''
+        Write-Host '>>> NOW CREATE THE RULE IN THE ESET UI (exact name above). The kit is watching for it. <<<'
+        Write-Host ('Waiting up to ' + $RuleAppearTimeoutSeconds + 's for the rule to appear; exports run automatically every ' + $PollSeconds + 's.')
+        if (-not (Wait-ForVerdictFile -Name 'with-rule-verdict' -TimeoutSeconds $RuleAppearTimeoutSeconds)) {
+            throw 'Rule did not appear within the wait window. Nothing was created by this kit.'
+        }
+        $withRuleVerdict = Read-VerdictJson 'with-rule-verdict'
+        $script:XmlDiffKind = $withRuleVerdict.classification
+        $script:Report.xml_diff = @{ kind=$withRuleVerdict.classification; added_roots=$withRuleVerdict.addedRootCount; name_match=$withRuleVerdict.nameMatch }
+        Save-SanitizedRuleDiff (Read-VerdictJson 'with-rule-diff') (Join-Path $script:Evidence 'baseline.xml') (Join-Path $script:Evidence 'with-rule.xml')
+        if ($withRuleVerdict.classification -eq 'STRUCTURAL_SINGLE_INSERTION_CANDIDATE') {
+            Add-Check 'single-rule-structure' 'UNVERIFIED' 'Exactly one added subtree root carrying exactly one rule-name attribute value; ESET rule schema still requires review.'
         } else {
-            Add-Check 'single-rule-structure' 'UNVERIFIED' ('Classification ' + $diff.Kind + '; the rule XML shape is NOT confirmed. Observation continues and sanitized-rule-diff.txt records what was found.')
-            Write-Warning ('Rule XML shape NOT confirmed (' + $diff.Kind + '). Continuing the block/log observation. This stays UNVERIFIED.')
+            Add-Check 'single-rule-structure' 'UNVERIFIED' ('Classification ' + $withRuleVerdict.classification + '; the rule XML shape is NOT confirmed. Observation continues; sanitized-rule-diff.txt records what was found.')
+            Write-Warning ('Rule XML shape NOT confirmed (' + $withRuleVerdict.classification + '). Continuing the block/log observation. This stays UNVERIFIED.')
         }
         $script:Report.block_attempt_time = (Get-Date).ToString('o')
         Write-Host ('Block test starting at: ' + $script:Report.block_attempt_time)
@@ -210,36 +203,34 @@ try {
         if ($outcome) { $script:Report.block_launch = $outcome; $ranNormally = ($outcome.ExitCode -eq 0 -and $outcome.Stdout.TrimEnd([char[]]@("`r","`n")) -ceq 'Test Application') }
         if ($ranNormally) { throw 'Executable ran normally while the rule was present; the blocking test FAILED.' }
         Add-Check 'blocked-launch' 'UNVERIFIED' 'Launch was not a normal successful run; this alone does NOT prove ESET blocking.'
-        if (-not (Confirm-Yes 'In Tools > Log files > HIPS, confirm exact rule AND exact test EXE AND denied result at the printed test time')) { throw 'Matching HIPS denied log entry missing or ambiguous.' }
-        Add-Check 'HIPS-log-correlation' 'OWNER_REPORTED' 'Owner confirmed exact rule, exact target, denied result and corresponding attempt time.'
-        $notification = Confirm-Yes 'Was an ESET block notification observed for this attempt?'
-        if ($notification) { Add-Check 'notification' 'OWNER_REPORTED' 'Owner observed notification.' } else { Add-Check 'notification' 'UNVERIFIED' 'Notification not confirmed.' }
+        Write-Host ''
+        Write-Host 'HIPS LOG CORRELATION (manual, unblocking): while the supervisor watches, open'
+        Write-Host 'Tools > Log files > HIPS and confirm the exact rule, the exact test EXE and a'
+        Write-Host ('denied result near ' + $script:Report.block_attempt_time + '.')
+        Write-Host 'This run does not ask for typed confirmation; the result is recorded as PENDING_OWNER.'
+        Add-Check 'HIPS-log-correlation' 'PENDING_OWNER' 'Owner must confirm exact rule, exact target, denied result and attempt time in the HIPS log.'
+        Add-Check 'notification' 'PENDING_OWNER' 'Owner may observe an ESET block notification; not machine-verified.'
         Add-Check 'add-twice-idempotency' 'UNVERIFIED' 'No programmatic adapter; add-twice test intentionally not attempted.'
+        [void](Write-VerdictFile 'block-done')
+        Write-Host ''
+        Write-Host '>>> NOW REMOVE THE RULE IN THE ESET HIPS UI (exact name above). <<<'
+        Write-Host 'Removal is proven when the export is byte-identical to the baseline.'
+        if (-not (Wait-ForVerdictFile -Name 'removed-verdict' -TimeoutSeconds $RemovalTimeoutSeconds)) {
+            throw 'Removal was not proven within the wait window. Manual inspection of the test rule is required.'
+        }
+        Add-Check 'rule-removal-machine-verified' 'PASS' 'After-removal export byte-identical to the private baseline; removal proven without owner confirmation.'
+        $script:Report.cleanup_unresolved = $false
+        Assert-HarmlessSuccess (Test-HarmlessLaunch)
+        Add-Check 'cleanup-preservation' 'PASS' 'Post-removal executable restored to exact expected stdout/exit 0.'
     }
 } catch {
     $script:Report.diagnostics += $_.Exception.Message
     Add-Check 'controller' 'FAIL' 'Operation failed; see console/private diagnostics. No configuration import performed.'
     Write-Host ('FAILED: ' + $_.Exception.Message) -ForegroundColor Red
 } finally {
-    if ($script:PotentialRule) {
-        try {
-            Write-Warning ('CLEANUP REQUIRED: Remove ONLY ' + $RuleName + ' targeting ' + $script:Exe)
-            if (-not (Confirm-Yes 'Inspect exact name/target in HIPS UI; remove only the new test rule; confirm removed')) { throw 'Cleanup not confirmed.' }
-            $post = Export-Configuration 'after-removal'
-            $baselinePath = Join-Path $script:Evidence 'baseline.xml'
-            $sameBytes = ((Get-FileHash $baselinePath -Algorithm SHA256).Hash -ceq (Get-FileHash $post -Algorithm SHA256).Hash)
-            $cleanupComparison = Compare-SafeXml ([IO.File]::ReadAllText($baselinePath)) ([IO.File]::ReadAllText($post))
-            $script:Report.cleanup_comparison = $cleanupComparison.Kind
-            if (-not $sameBytes) { throw 'After-removal export is not byte-identical to baseline. No volatile-field exceptions assumed.' }
-            Assert-HarmlessSuccess (Test-HarmlessLaunch)
-            Add-Check 'cleanup-preservation' 'PASS' 'Post-removal export byte-identical to baseline; normal executable output/exit restored.'
-            Add-Check 'rule-removal' 'OWNER_REPORTED' 'Owner removed only the exact new rule; export preservation and launch checked automatically.'
-            $script:PotentialRule = $false; $script:Report.cleanup_unresolved = $false
-        } catch {
-            $script:Report.diagnostics += $_.Exception.Message
-            Add-Check 'cleanup' 'FAIL' 'Rule or configuration state unresolved. Manual inspection/removal required; no blind baseline import.'
-            Write-Warning ('CLEANUP UNRESOLVED: ' + $_.Exception.Message + '. Inspect ONLY the exact new rule: ' + $RuleName)
-        }
+    if ($script:PotentialRule -and $script:Report.cleanup_unresolved) {
+        Add-Check 'cleanup' 'FAIL' 'Rule or configuration state unresolved. Manual inspection/removal of ONLY the exact test rule is required: ' + $RuleName
+        Write-Warning ('CLEANUP UNRESOLVED: inspect ONLY the exact new rule: ' + $RuleName)
     }
     Add-Check 'programmatic-architecture-gate' 'UNVERIFIED' 'No programmatic insert/sign/import or automated HIPS-log proof; Phase 1 NOT passed.'
     if ($script:Evidence) {

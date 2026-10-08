@@ -60,7 +60,7 @@ try {
         Assert-Throws { Assert-SafeLocalPath '\\server\share\x' } 'UNC rejected'
         Assert-Throws { Assert-SafeLocalPath 'C:\OneDrive\x' } 'synced path rejected'
     }
-    $controller = Join-Path $root 'Invoke-EsetHipsPoc.v2026-10-08.3.ps1'
+    $controller = Join-Path $root 'Invoke-EsetHipsPoc.v2026-10-08.4.ps1'
     $tokens = $null; $errors = $null
     $ast = [System.Management.Automation.Language.Parser]::ParseFile($controller,[ref]$tokens,[ref]$errors)
     $save = $ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Save-Evidence'},$true)[0]

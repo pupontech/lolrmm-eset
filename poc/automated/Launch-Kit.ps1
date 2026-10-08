@@ -4,7 +4,10 @@ param(
     [string]$KitDir,
     [switch]$DryRun,
     [switch]$IAmOnATestMachine,
-    [switch]$ValidateOnly
+    [switch]$ValidateOnly,
+    [int]$RuleAppearTimeoutSeconds = 1800,
+    [int]$RemovalTimeoutSeconds = 1800,
+    [int]$PollSeconds = 20
 )
 $ErrorActionPreference = 'Stop'
 try {
@@ -31,7 +34,7 @@ try {
         $IAmOnATestMachine = $true
     }
     $global:LASTEXITCODE = 1
-    & $versions[0].File -KitDir $KitDir -DryRun:$DryRun -IAmOnATestMachine:$IAmOnATestMachine
+    & $versions[0].File -KitDir $KitDir -DryRun:$DryRun -IAmOnATestMachine:$IAmOnATestMachine -RuleAppearTimeoutSeconds $RuleAppearTimeoutSeconds -RemovalTimeoutSeconds $RemovalTimeoutSeconds -PollSeconds $PollSeconds
     exit $LASTEXITCODE
 } catch {
     Write-Host ('FAILED AT LAUNCHER: ' + $_.Exception.Message) -ForegroundColor Red
