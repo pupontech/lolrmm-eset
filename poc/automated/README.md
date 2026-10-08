@@ -2,6 +2,25 @@
 
 **This is a runnable evidence-preparation kit, not a fully automated blocking utility.** It automates integrity checks, local folders, configuration exports, non-elevated process execution and reports. Creating/removing the exact test rule and confirming its HIPS log entry still require the owner. No ESET configuration import or UI automation is implemented. No consumer product/version is yet certified supported.
 
+## What to send back after a run
+
+Send only these two files from the new `%USERPROFILE%\LOLRMM-Evidence\<run-id>` folder:
+
+- `RESULTS.txt`
+- `sanitized-rule-diff.txt`
+
+Do not send `result.json`, the `.xml` exports, worker JSON or the console log: they can contain private paths and unrelated settings. `sanitized-rule-diff.txt` contains element and attribute NAMES only, never attribute values or text, so it is safe to share and is the file that tells us the real rule structure.
+
+Exit code 2 means the guided observation finished but the programmatic Phase 1 gate is still unverified - that is the expected outcome for this kit, not a failure. Exit code 1 means something needs attention; send the two files plus the exact printed error line.
+
+## XML comparison repair - v2026-10-08.3
+
+The owner reached the manual rule step, and the run then failed on our own comparison: the shipped comparator required that removing one subtree restore the entire parsed document, and it skipped documents over 2000 elements. Real ESET exports are far larger, so a correct single-rule change was rejected and the observation was abandoned before the block/log test.
+
+The comparator is now an index-free multiset diff over a Merkle-style context hash of every element (name, namespace, own attributes and own text, with XML indentation ignored). It is linear in document size and handles reordering, deep nesting and duplicate sibling shapes. Classifications are explicit: `NO_CHANGE`, `ORDER_OR_FORMATTING_ONLY_UNVERIFIED`, `STRUCTURAL_SINGLE_INSERTION_CANDIDATE`, `MULTIPLE_SUBTREE_INSERTIONS` or `UNEXPLAINED_DIFFERENCE`.
+
+An unexpected classification no longer aborts the run. The kit records it, verifies nothing on our side, and continues to the block/log observation, because the ESET block and HIPS log entry are the evidence that actually matters. `sanitized-rule-diff.txt` now records the classification, element counts, export hashes and the added subtree's element/attribute NAMES only - never attribute values or text. Nothing is ever imported into ESET.
+
 ## ACL privilege repair - v2026-10-08.2
 
 The owner reached a normal-user baseline launch, then failed with `SeSecurityPrivilege` during export preparation. Windows 2022 and 2025 CI reproduced the same exception at the old `Set-Acl` call under an effective token with administrator membership disabled and SeSecurityPrivilege absent. The previous elevated CI tests had missed this normal-user requirement.

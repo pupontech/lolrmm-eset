@@ -22,11 +22,44 @@ function Save-Evidence {
     $script:Report.status = (Get-OverallTruth @($script:Checks | ForEach-Object { $_.status })).Overall
     $script:Report.finished = (Get-Date).ToString('o')
     $script:Report | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $script:Evidence 'result.json') -Encoding UTF8
-    $share = @('LOLRMM ESET Phase 1 - guided observation', ('Overall: ' + $script:Report.status), 'Architecture gate: UNVERIFIED', ('Cleanup unresolved: ' + $script:Report.cleanup_unresolved), 'Raw XML and diagnostics are PRIVATE. Do not share result.json.')
-    foreach ($check in $script:Checks) { $share += ($check.name + ': ' + $check.status + ' - ' + $check.detail) }
+    $share = @('LOLRMM ESET Phase 1 - guided observation', ('Overall: ' + $script:Report.status), 'Architecture gate: UNVERIFIED', ('Cleanup unresolved: ' + $script:Report.cleanup_unresolved), ('XML diff classification: ' + $script:XmlDiffKind))
+    if ($script:Checks) { foreach ($check in $script:Checks) { $share += ($check.name + ': ' + $check.status + ' - ' + $check.detail) } }
+    $share += 'Raw XML and diagnostics are PRIVATE. Do not share result.json.'
     $share | Set-Content -LiteralPath (Join-Path $script:Evidence 'RESULTS.txt') -Encoding ASCII
-    @('Raw XML deliberately withheld pending schema review.', ('Rule name: ' + $RuleName), 'Target: <USER_LOCAL_RUN>\LolrmmEsetTest.exe', 'No wildcard, folder, allow rule, exclusion or import generated.', 'Only share RESULTS.txt and this file. Keep all other evidence private.') | Set-Content -LiteralPath (Join-Path $script:Evidence 'sanitized-rule-diff.txt') -Encoding ASCII
+    if (-not $script:RuleDiffWritten) {
+        @('No structural XML comparison was produced in this run. Raw XML is withheld.') | Set-Content -LiteralPath (Join-Path $script:Evidence 'sanitized-rule-diff.txt') -Encoding ASCII
+    }
     $share | Set-Content -LiteralPath (Join-Path $script:Evidence 'run-status.txt') -Encoding ASCII
+}
+function Save-SanitizedRuleDiff($Diff, [string]$BaselinePath, [string]$AfterPath) {
+    $lines = New-Object 'System.Collections.Generic.List[string]'
+    $lines.Add('Sanitized structural XML comparison. Attribute NAMES and element NAMES only.')
+    $lines.Add('No attribute values, no text content and no full configuration are reproduced here.')
+    $lines.Add('')
+    $lines.Add('Classification: ' + $Diff.Kind)
+    $lines.Add('Elements before / after: ' + $Diff.ElementsBefore + ' / ' + $Diff.ElementsAfter)
+    $lines.Add('Added elements: ' + $Diff.AddedElements)
+    $lines.Add('Removed elements: ' + $Diff.RemovedElements)
+    $lines.Add('Changed elements: ' + $Diff.ChangedElements)
+    $lines.Add('Added complete subtree roots: ' + $Diff.AddedRootCount)
+    if ($Diff.Truncated) { $lines.Add('Added-root list was truncated.') }
+    $lines.Add('Baseline export SHA256: ' + (Get-FileHash -LiteralPath $BaselinePath -Algorithm SHA256).Hash)
+    $lines.Add('With-rule export SHA256: ' + (Get-FileHash -LiteralPath $AfterPath -Algorithm SHA256).Hash)
+    $lines.Add('')
+    if (@($Diff.AddedRoots).Count -eq 0) {
+        $lines.Add('No added element subtree was identified at all.')
+    }
+    foreach ($root in @($Diff.AddedRoots)) {
+        $lines.Add('ADDED ROOT PATH: ' + (Format-PathForDiagnostic $root.Path))
+        $lines.Add('  element name: ' + $root.LocalName)
+        $lines.Add('  attribute names: ' + ((@($root.AttributeNames)) -join ', '))
+        $lines.Add('  direct child element names: ' + ((@($root.ChildElementNames)) -join ', '))
+    }
+    $lines.Add('')
+    $lines.Add('Expected classification for a single manually added HIPS rule is STRUCTURAL_SINGLE_INSERTION_CANDIDATE.')
+    $lines.Add('Any other classification is NOT a validated rule schema and remains UNVERIFIED.')
+    $lines | Set-Content -LiteralPath (Join-Path $script:Evidence 'sanitized-rule-diff.txt') -Encoding ASCII
+    $script:RuleDiffWritten = $true
 }
 function Export-Configuration([string]$ExportStage) {
     Write-Host ('EXPORT STEP: private access-permission check for ' + $ExportStage)
@@ -90,6 +123,7 @@ if ($Worker) {
 }
 $script:Checks = New-Object 'System.Collections.Generic.List[object]'
 $script:Evidence = $null; $script:PotentialRule = $false; $script:Exe = $null
+$script:XmlDiffKind = 'NOT_COMPUTED'; $script:RuleDiffWritten = $false
 $script:Report = [ordered]@{ status='UNVERIFIED'; architecture_gate='UNVERIFIED'; cleanup_unresolved=$false; started=(Get-Date).ToString('o'); timezone=[TimeZoneInfo]::Local.Id; environment=@{}; steps=@(); diagnostics=@(); finished=$null }
 try {
     if ($env:OS -ne 'Windows_NT') { throw 'Windows required; live ESET cannot be exercised here.' }
@@ -158,15 +192,23 @@ try {
         if (-not (Confirm-Yes 'Now create only that exact rule in ESET UI, then confirm complete (no/unknown triggers cleanup)')) { throw 'Manual creation not confirmed.' }
         $withRule = Export-Configuration 'with-manual-rule'
         $diff = Compare-SafeXml ([IO.File]::ReadAllText($baseline)) ([IO.File]::ReadAllText($withRule))
-        if ($diff.Kind -ne 'STRUCTURAL_SINGLE_INSERTION_CANDIDATE') { throw 'Export change is not exactly one inserted structural subtree; XML mapping unresolved.' }
-        Add-Check 'single-rule-structure' 'UNVERIFIED' 'One inserted structural subtree candidate; HIPS semantics require schema review.'
+        $script:XmlDiffKind = $diff.Kind
+        $script:Report.xml_diff = @{ kind=$diff.Kind; added=$diff.AddedElements; removed=$diff.RemovedElements; changed=$diff.ChangedElements; added_roots=$diff.AddedRootCount; elements_before=$diff.ElementsBefore; elements_after=$diff.ElementsAfter; truncated=$diff.Truncated }
+        Write-Host ('XML DIFF: ' + $diff.Kind + ' | elements ' + $diff.ElementsBefore + ' -> ' + $diff.ElementsAfter + ' | added=' + $diff.AddedElements + ' removed=' + $diff.RemovedElements + ' changed=' + $diff.ChangedElements + ' addedRoots=' + $diff.AddedRootCount)
+        Save-SanitizedRuleDiff $diff $baseline $withRule
+        if ($diff.Kind -eq 'STRUCTURAL_SINGLE_INSERTION_CANDIDATE') {
+            Add-Check 'single-rule-structure' 'UNVERIFIED' 'Exactly one added subtree root and nothing else changed; the ESET rule schema still requires review.'
+        } else {
+            Add-Check 'single-rule-structure' 'UNVERIFIED' ('Classification ' + $diff.Kind + '; the rule XML shape is NOT confirmed. Observation continues and sanitized-rule-diff.txt records what was found.')
+            Write-Warning ('Rule XML shape NOT confirmed (' + $diff.Kind + '). Continuing the block/log observation. This stays UNVERIFIED.')
+        }
         $script:Report.block_attempt_time = (Get-Date).ToString('o')
         Write-Host ('Block test starting at: ' + $script:Report.block_attempt_time)
         $launchFailed = $false; $outcome = $null
         try { $outcome = Test-HarmlessLaunch; $script:Report.block_launch_classification = 'PROCESS_EXITED' } catch { $launchFailed = $true; $script:Report.block_launch_classification = 'LAUNCH_ERROR_OR_TIMEOUT_UNRESOLVED'; $script:Report.diagnostics += $_.Exception.Message }
         $ranNormally = $false
         if ($outcome) { $script:Report.block_launch = $outcome; $ranNormally = ($outcome.ExitCode -eq 0 -and $outcome.Stdout.TrimEnd([char[]]@("`r","`n")) -ceq 'Test Application') }
-        if ($ranNormally) { throw 'Executable ran normally while rule present; blocking test FAILED.' }
+        if ($ranNormally) { throw 'Executable ran normally while the rule was present; the blocking test FAILED.' }
         Add-Check 'blocked-launch' 'UNVERIFIED' 'Launch was not a normal successful run; this alone does NOT prove ESET blocking.'
         if (-not (Confirm-Yes 'In Tools > Log files > HIPS, confirm exact rule AND exact test EXE AND denied result at the printed test time')) { throw 'Matching HIPS denied log entry missing or ambiguous.' }
         Add-Check 'HIPS-log-correlation' 'OWNER_REPORTED' 'Owner confirmed exact rule, exact target, denied result and corresponding attempt time.'
@@ -191,12 +233,12 @@ try {
             if (-not $sameBytes) { throw 'After-removal export is not byte-identical to baseline. No volatile-field exceptions assumed.' }
             Assert-HarmlessSuccess (Test-HarmlessLaunch)
             Add-Check 'cleanup-preservation' 'PASS' 'Post-removal export byte-identical to baseline; normal executable output/exit restored.'
-            Add-Check 'rule-removal' 'OWNER_REPORTED' 'Owner removed only exact new rule; export preservation and launch checked automatically.'
+            Add-Check 'rule-removal' 'OWNER_REPORTED' 'Owner removed only the exact new rule; export preservation and launch checked automatically.'
             $script:PotentialRule = $false; $script:Report.cleanup_unresolved = $false
         } catch {
             $script:Report.diagnostics += $_.Exception.Message
             Add-Check 'cleanup' 'FAIL' 'Rule or configuration state unresolved. Manual inspection/removal required; no blind baseline import.'
-            Write-Warning ('CLEANUP UNRESOLVED: ' + $_.Exception.Message + '. Inspect ONLY exact new rule: ' + $RuleName)
+            Write-Warning ('CLEANUP UNRESOLVED: ' + $_.Exception.Message + '. Inspect ONLY the exact new rule: ' + $RuleName)
         }
     }
     Add-Check 'programmatic-architecture-gate' 'UNVERIFIED' 'No programmatic insert/sign/import or automated HIPS-log proof; Phase 1 NOT passed.'

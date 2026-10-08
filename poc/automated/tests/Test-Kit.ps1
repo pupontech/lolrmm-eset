@@ -60,7 +60,7 @@ try {
         Assert-Throws { Assert-SafeLocalPath '\\server\share\x' } 'UNC rejected'
         Assert-Throws { Assert-SafeLocalPath 'C:\OneDrive\x' } 'synced path rejected'
     }
-    $controller = Join-Path $root 'Invoke-EsetHipsPoc.v2026-10-08.2.ps1'
+    $controller = Join-Path $root 'Invoke-EsetHipsPoc.v2026-10-08.3.ps1'
     $tokens = $null; $errors = $null
     $ast = [System.Management.Automation.Language.Parser]::ParseFile($controller,[ref]$tokens,[ref]$errors)
     $save = $ast.FindAll({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Save-Evidence'},$true)[0]
@@ -69,6 +69,7 @@ try {
     $script:Checks = New-Object 'System.Collections.Generic.List[object]'
     $script:Checks.Add([pscustomobject]@{name='fixture';status='OWNER_REPORTED';detail='Safe fixed message.'})
     $script:Report = [ordered]@{environment=@{private='SECRET_FIXTURE_USERNAME'};diagnostics=@('SECRET_FIXTURE_PASSWORD');cleanup_unresolved=$false;steps=@();status='UNVERIFIED';finished=$null}
+    $script:XmlDiffKind = 'NOT_COMPUTED'; $script:RuleDiffWritten = $false
     Save-Evidence
     $share = [IO.File]::ReadAllText((Join-Path $case 'RESULTS.txt')) + [IO.File]::ReadAllText((Join-Path $case 'sanitized-rule-diff.txt'))
     Assert (-not $share.Contains('SECRET_FIXTURE')) 'real report writer excludes private fixture fields'
