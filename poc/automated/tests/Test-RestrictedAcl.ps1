@@ -92,11 +92,23 @@ try {
     Invoke-Expression $fn.Extent.Text
     $script:Evidence=$dir; $script:Sid=$sid; $script:RunId=('0' * 32)
     # Reproduce the pre-UAC export preparation while refusing any actual UAC/export.
-    function Get-Process { return $null }
+    # The mock must emit no pipeline value: a real missing Get-Process result is
+    # empty, and the preflight's @(Get-Process).Count must stay 0. A function that
+    # "returns" $null emits one null element and would fail the preflight instead.
+    function Get-Process { <# missing process: no pipeline output #> }
     function Start-Process { throw 'UAC_BOUNDARY_REACHED_NO_VENDOR_EXECUTED' }
-    $boundary=$false
-    try { Export-Configuration 'baseline' | Out-Null } catch { $boundary=$_.Exception.Message.Contains('UAC_BOUNDARY_REACHED_NO_VENDOR_EXECUTED') }
-    if (-not $boundary) { throw 'Production export preflight did not reach the UAC boundary under restricted token.' }
+    $boundary = $false; $boundaryError = $null; $boundaryErrorType = $null
+    try { Export-Configuration 'baseline' | Out-Null }
+    catch {
+        $boundaryError = [string]$_.Exception.Message
+        $boundaryErrorType = $_.Exception.GetType().FullName
+        if ($boundaryError.Contains('UAC_BOUNDARY_REACHED_NO_VENDOR_EXECUTED')) { $boundary = $true }
+    }
+    if (-not $boundary) {
+        $actualError = $boundaryError
+        if (-not $actualError) { $actualError = 'no exception was raised before the UAC boundary' }
+        throw ('Production export preflight did not reach the UAC boundary under restricted token. Actual error: ' + $boundaryErrorType + ' - ' + $actualError)
+    }
     Write-Output 'ACL_RESTRICTED_PASS: first and 20 repeated folder/file updates; production export pre-UAC path reached.'
 } finally {
     if ($token -ne [IntPtr]::Zero) { [AclRestrictedTokenProof]::End($token) }

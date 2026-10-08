@@ -32,6 +32,7 @@ jobs:
       - name: Test helpers with Windows PowerShell 5.1
         shell: powershell
         run: |
+          ./poc/automated/tests/Test-EmptyProcessResult.ps1
           ./poc/automated/tests/Test-PathRegression.ps1
           ./poc/automated/tests/Test-Kit.ps1
       - name: Parse and byte-check shipped scripts
