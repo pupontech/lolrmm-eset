@@ -14,7 +14,7 @@ $ProgressPreference='SilentlyContinue'
 Invoke-WebRequest -UseBasicParsing -TimeoutSec 60 -Uri 'https://download.eset.com/com/eset/config/enable_screen_reader_access/mac/latest/screen_readers_config.zip' -OutFile $zip
 Invoke-WebRequest -UseBasicParsing -TimeoutSec 60 -Uri 'https://download.eset.com/com/eset/tools/installers/xmlsigntool/latest/xmlsigntool.exe' -OutFile $exe
 $signature=Get-AuthenticodeSignature -LiteralPath $exe
-if ($signature.Status -ne 'Valid' -or $null -eq $signature.SignerCertificate -or $signature.SignerCertificate.Subject -notmatch 'O=ESET, spol\. s r\.o\.') { throw ('Official signer Authenticode not trusted: ' + $signature.Status) }
+if ($signature.Status -ne 'Valid' -or $null -eq $signature.SignerCertificate -or $signature.SignerCertificate.Subject -notmatch '(?:^|,\s*)O="?ESET, spol\. s r\.o\."?(?:,|$)') { throw ('Official signer Authenticode not trusted: ' + $signature.Status) }
 $archive=[IO.Compression.ZipFile]::OpenRead($zip)
 try {
     $entry=$archive.GetEntry('screen_readers_config.xml')
