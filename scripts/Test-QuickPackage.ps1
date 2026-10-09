@@ -43,6 +43,23 @@ foreach ($name in @('Eset-QuickRules.ps1','START-HERE.ps1','START-HERE.bat')) {
 $batText = [Text.Encoding]::ASCII.GetString($members['START-HERE.bat'])
 if ($batText.Replace("`r`n",'').Contains("`n")) { throw 'BAT requires CRLF.' }
 Write-Output ('PACKAGE_BYTES_PASS: exact member set, all hashes, full source SHA ' + $SourceCommit)
+function Invoke-PackageBat([string]$Launcher) {
+    $start=New-Object Diagnostics.ProcessStartInfo
+    $start.FileName=$env:ComSpec
+    # Raw CreateProcess argument string avoids PS 5.1 native quoting transformation.
+    $start.Arguments='/d /s /c ""'+$Launcher+'" -ValidateOnly"'
+    $start.UseShellExecute=$false
+    $start.RedirectStandardOutput=$true; $start.RedirectStandardError=$true
+    $process=New-Object Diagnostics.Process
+    $process.StartInfo=$start
+    try {
+        if(-not $process.Start()) { throw 'Packaged BAT did not start.' }
+        $out=$process.StandardOutput.ReadToEndAsync(); $err=$process.StandardError.ReadToEndAsync()
+        if(-not $process.WaitForExit(30000)) { $process.Kill(); throw 'Packaged BAT timed out.' }
+        if(-not [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($out,$err),5000)) { throw 'Packaged BAT output timed out.' }
+        return [pscustomobject]@{ExitCode=$process.ExitCode;Text=($out.Result+$err.Result)}
+    } finally { $process.Dispose() }
+}
 $folder = Join-Path ([IO.Path]::GetTempPath()) ('ESET quick package '+[guid]::NewGuid().ToString('N'))
 [void](New-Item -ItemType Directory -Path $folder)
 try {
@@ -54,8 +71,8 @@ try {
     }
     if ($env:OS -eq 'Windows_NT') {
         $launcher = Join-Path $folder 'START-HERE.bat'
-        $out = & $env:ComSpec /d /c ('""' + $launcher + '" -ValidateOnly"') 2>&1
-        $code = $LASTEXITCODE
+        $result=Invoke-PackageBat $launcher
+        $out=$result.Text; $code=$result.ExitCode
         if ($code -ne 0 -or ($out -join "`n") -notmatch 'PACKAGE_VALIDATION_PASS') { throw ('Actual extracted BAT validation failed; exit ' + $code + ': ' + ($out -join ' ')) }
         $exe = Join-Path $folder 'LolrmmEsetTest.exe'
         $text = & $exe
@@ -63,8 +80,8 @@ try {
         if ($code -ne 0 -or $text -cne 'Test Application') { throw 'Packaged harmless EXE failed.' }
         # Real error propagation: remove only this owned extraction's entrypoint.
         Remove-Item -LiteralPath (Join-Path $folder 'Eset-QuickRules.ps1')
-        $out = & $env:ComSpec /d /c ('""' + $launcher + '" -ValidateOnly"') 2>&1
-        $code = $LASTEXITCODE
+        $result=Invoke-PackageBat $launcher
+        $out=$result.Text; $code=$result.ExitCode
         if ($code -ne 1 -or ($out -join "`n") -notmatch 'Missing package member') { throw 'Extracted BAT concealed the missing-script failure.' }
         Write-Output 'WINDOWS_PACKAGE_SMOKE_PASS: actual BAT, space path, EXE output, missing-member exit propagation; no ESET access.'
     } else { Write-Output 'WINDOWS_PACKAGE_SMOKE_NOT_RUN: host is not Windows.' }

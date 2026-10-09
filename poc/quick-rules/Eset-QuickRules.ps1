@@ -452,6 +452,21 @@ function New-QuickAppendPayload {
     return ,$payload
 }
 
+function Assert-QuickSignedPayload {
+    param([Xml.XmlDocument] $Before, [Xml.XmlDocument] $Signed)
+    # Observed from the official XmlSignTool /version 2 on both Windows CI legs.
+    # This validates representation and unchanged content, NOT cryptographic validity.
+    $copy = [Xml.XmlDocument]$Signed.CloneNode($true)
+    $markers = @($copy.SelectNodes('//comment()') | Where-Object { $_.Value -cmatch '^ Signature: [A-Za-z0-9+/]{86}== $' })
+    if ($markers.Count -ne 1 -or $markers[0].ParentNode -ne $copy) { throw 'Expected exactly one trailing native signature comment.' }
+    $last = @($copy.ChildNodes | Where-Object { $_.NodeType -ne [Xml.XmlNodeType]::Whitespace })[-1]
+    if ($last -ne $markers[0]) { throw 'Native signature comment is not the final document node.' }
+    $encoded = $markers[0].Value.Substring(12).Trim()
+    if ([Convert]::FromBase64String($encoded).Length -ne 64) { throw 'Unexpected native signature length.' }
+    [void]$copy.RemoveChild($markers[0])
+    if ((Get-QuickCanonicalXml $Before) -cne (Get-QuickCanonicalXml $copy)) { throw 'Signer changed payload XML beyond the exact observed signature comment.' }
+}
+
 function Show-QuickRulesPlan {
     param([object] $Plan)
     [Console]::WriteLine('EXPERIMENTAL ESET 19 append schema: NOT CERTIFIED; preview is not evidence of blocking.')
@@ -522,7 +537,8 @@ function Assert-QuickEsetSignature {
     if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'ESET Authenticode verification is available only on Windows.' }
     $signature = Get-AuthenticodeSignature -LiteralPath $Path -ErrorAction Stop
     if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or
-        [string]$signature.SignerCertificate.Subject -notmatch '(?i)ESET') {
+        $null -eq $signature.SignerCertificate -or
+        [string]$signature.SignerCertificate.Subject -notmatch '(?:^|,\s*)O="?ESET, spol\. s r\.o\."?(?:,|$)') {
         throw 'ESET executable Authenticode signature is not valid for an ESET signer.'
     }
     return Get-QuickFileHash -Path $Path
@@ -698,6 +714,14 @@ function Get-QuickProviderConfiguration {
     Assert-QuickProviderResult -Result $result -Operation $Operation
     if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw ($Operation + ' did not create an export file.') }
     $document = Read-QuickXmlFile -Path $Path
+    if ($Providers.ContainsKey('ExpectedVersion')) {
+        $expectedVersion = [string]$Providers.ExpectedVersion
+        $context = Get-QuickHipsContext -Configuration $document
+        if ($expectedVersion -cnotmatch '^19\.\d+\.\d+(?:\.\d+)?$' -or
+            $context.Product.GetAttribute('VERSION') -cne $expectedVersion) {
+            throw 'Export does not exactly match the independently identified installed consumer version.'
+        }
+    }
     return ,$document
 }
 
@@ -765,15 +789,16 @@ function Invoke-QuickApplyTransaction {
         $stage = 'official interactive signing'
         $signResult = & $Providers.Sign $payloadPath
         Assert-QuickProviderResult -Result $signResult -Operation 'Official interactive signing'
-        $signed = Read-QuickXmlFile -Path $payloadPath
-        if ((Get-QuickCanonicalXml $signed) -cne $payloadCanonical) { throw 'Signer changed payload XML outside the inspected no-change format.' }
-        $signedHash = Get-QuickFileHash -Path $payloadPath
-        $stage = 'pre-import concurrency export'
-        $concurrent = Get-QuickProviderConfiguration -Providers $Providers -Path $concurrentPath -Operation 'Pre-import safe export'
-        if ((Get-QuickCanonicalXml $baseline) -cne (Get-QuickCanonicalXml $concurrent)) { throw 'Configuration changed after preview; import was stopped.' }
         $stage = 'signed payload integrity'
         $payloadLock = [IO.File]::Open($payloadPath,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
         try {
+            $signed = Read-QuickXmlFile -Path $payloadPath
+            Assert-QuickSignedPayload -Before $payload -Signed $signed
+            $signedHash = Get-QuickFileHash -Path $payloadPath
+            $stage = 'pre-import concurrency export'
+            $concurrent = Get-QuickProviderConfiguration -Providers $Providers -Path $concurrentPath -Operation 'Pre-import safe export'
+            if ((Get-QuickCanonicalXml $baseline) -cne (Get-QuickCanonicalXml $concurrent)) { throw 'Configuration changed after preview; import was stopped.' }
+            $stage = 'signed payload integrity'
             $hash = [Security.Cryptography.SHA256]::Create()
             try { $lockedHash = [BitConverter]::ToString($hash.ComputeHash($payloadLock)).Replace('-','') } finally { $hash.Dispose() }
             if ($lockedHash -cne $signedHash) { throw 'Signed payload changed after validation; import stopped.' }
@@ -802,7 +827,7 @@ function Invoke-QuickApplyTransaction {
         try { Write-QuickDiagnostic -Path $diagPath -Message ('Stage=' + $stage + '; ' + $raw) } catch {}
         $status = if ($importStarted) { 'IMPORT_OR_READBACK_UNVERIFIED' } else { 'FAILED_BEFORE_IMPORT' }
         try { Write-QuickResults -RunRoot $RunRoot -Status $status -Added $added -Unchanged $unchanged } catch {}
-            throw ('Apply transaction failed at ' + $stage + '. Import/native-work outcome may be unknown; inspect ESET before retrying. No automatic rollback was attempted; private diagnostics: ' + $diagPath + '.')
+        throw ('Apply transaction failed at ' + $stage + '. Import/native-work outcome may be unknown; inspect ESET before retrying. No automatic rollback was attempted; private diagnostics: ' + $diagPath + '.')
     }
 }
 
@@ -827,7 +852,7 @@ function New-QuickProductionProviders {
         if ((Assert-QuickEsetSignature -Path $ecmdPath) -cne $ecmdHash) { throw 'ESET ecmd binary changed after verification.' }
         return Invoke-QuickProcess -FilePath $ecmdPath -Arguments @('/setcfg', $path) -TimeoutSeconds 180
     }.GetNewClosure()
-    return @{ Export = $export; Sign = $sign; Import = $import; Confirm = { param($plan) return Confirm-QuickApply -Plan $plan }; ProductionVerified = $true }
+    return @{ Export = $export; Sign = $sign; Import = $import; Confirm = { param($plan) return Confirm-QuickApply -Plan $plan }; ProductionVerified = $true; ExpectedVersion = [string]$Install.Product.Version }
 }
 
 function Invoke-QuickRulesMain {

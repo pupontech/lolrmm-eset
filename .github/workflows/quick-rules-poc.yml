@@ -30,7 +30,10 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: NativeSigner-${{ matrix.os }}
-          path: ${{ runner.temp }}/quick-signer-proof/signed-fixture.xml
+          path: |
+            ${{ runner.temp }}/quick-signer-proof/signed-fixture.xml
+            ${{ runner.temp }}/quick-signer-proof/before-fixture.xml
+            ${{ runner.temp }}/quick-signer-proof/signed-generated.xml
           if-no-files-found: error
       - name: Behavioral tests on Windows PowerShell 5.1
         shell: powershell
@@ -41,6 +44,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell boundary suite failed' }
           ./scripts/Test-QuickRegression.ps1
           if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell regression suite failed' }
+          ./scripts/Test-QuickSignature.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell signature suite failed' }
+          ./scripts/Test-QuickProcess.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell process suite failed' }
+          ./scripts/Test-QuickVersion.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell version suite failed' }
           exit 0
       - name: Behavioral tests on PowerShell 7
         shell: pwsh
@@ -51,6 +60,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 boundary suite failed' }
           ./scripts/Test-QuickRegression.ps1
           if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 regression suite failed' }
+          ./scripts/Test-QuickSignature.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 signature suite failed' }
+          ./scripts/Test-QuickProcess.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 process suite failed' }
+          ./scripts/Test-QuickVersion.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 version suite failed' }
           exit 0
       - name: Parse all new scripts and enforce byte constraints
         shell: powershell

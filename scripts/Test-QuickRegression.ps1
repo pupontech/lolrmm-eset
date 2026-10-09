@@ -28,7 +28,7 @@ try {
             [IO.File]::WriteAllText($path,$state.Xml)
             return [pscustomobject]@{ExitCode=0;StdOut='';StdErr=''}
         }.GetNewClosure()
-        Sign={param($path) return [pscustomobject]@{ExitCode=0;StdOut='';StdErr=''}}
+        Sign={param($path) [IO.File]::AppendAllText($path, ('<!-- Signature: '+[Convert]::ToBase64String((New-Object byte[] 64))+' -->')); return [pscustomobject]@{ExitCode=0;StdOut='';StdErr=''}}
         Import={param($path) $state.Imports++; return [pscustomobject]@{ExitCode=0;StdOut='';StdErr=''}}.GetNewClosure()
     }
     try { $null=Invoke-QuickApplyTransaction -Desired $want -Providers $providers -RunRoot $root -TestOnlyProvider } catch { }

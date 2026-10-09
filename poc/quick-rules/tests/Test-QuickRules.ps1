@@ -54,6 +54,8 @@ function New-FakeProviders([string] $BaseXml) {
         param($path)
         $script:FakeState.SignCount++
         if ($script:FakeState.Failure -eq 'sign') { throw 'fake signing failure' }
+        # Synthetic observed-format marker only; NEVER native cryptographic proof.
+        [IO.File]::AppendAllText($path, ('<!-- Signature: '+[Convert]::ToBase64String((New-Object byte[] 64))+' -->'))
         return [pscustomobject]@{ ExitCode = 0; StdOut = ''; StdErr = '' }
     }
     $import = {
