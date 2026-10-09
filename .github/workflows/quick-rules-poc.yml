@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
   push:
     branches: ['feat/quick-append-poc']
-    paths: ['poc/quick-rules/**', 'scripts/Test-Quick*.ps1', 'scripts/Test-XmlSigner.ps1', '.github/workflows/quick-rules-poc.yml']
+    paths: ['poc/quick-rules/**', 'scripts/Test-Quick*.ps1', 'scripts/Test-XmlSigner.ps1', 'scripts/Invoke-CiSignerConsole.ps1', '.github/workflows/quick-rules-poc.yml']
   pull_request:
-    paths: ['poc/quick-rules/**', 'scripts/Test-Quick*.ps1', 'scripts/Test-XmlSigner.ps1', '.github/workflows/quick-rules-poc.yml']
+    paths: ['poc/quick-rules/**', 'scripts/Test-Quick*.ps1', 'scripts/Test-XmlSigner.ps1', 'scripts/Invoke-CiSignerConsole.ps1', '.github/workflows/quick-rules-poc.yml']
 permissions:
   contents: read
 jobs:
@@ -55,7 +55,7 @@ jobs:
       - name: Parse all new scripts and enforce byte constraints
         shell: powershell
         run: |
-          $paths = @(Get-ChildItem poc/quick-rules -Filter '*.ps1' -Recurse) + @(Get-Item scripts/Test-QuickPackage.ps1)
+          $paths = @(Get-ChildItem poc/quick-rules -Filter '*.ps1' -Recurse) + @(Get-ChildItem scripts -Filter '*.ps1')
           foreach ($file in $paths) {
             $tokens=$null; $errors=$null
             [void][Management.Automation.Language.Parser]::ParseFile($file.FullName,[ref]$tokens,[ref]$errors)

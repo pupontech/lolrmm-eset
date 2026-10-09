@@ -490,6 +490,7 @@ function Invoke-QuickProcess {
     $process = New-Object System.Diagnostics.Process
     $process.StartInfo = $start
     $stdoutTask = $null; $stderrTask = $null
+    $clock = [Diagnostics.Stopwatch]::StartNew()
     try {
         if (-not $process.Start()) { throw 'Process did not start.' }
         if (-not $Interactive) {
@@ -499,10 +500,14 @@ function Invoke-QuickProcess {
         if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
             try { $process.Kill() } catch {}
             [void]$process.WaitForExit(5000)
-            throw 'Process timed out.'
+            throw 'Process timed out. Termination of all native work is unproven; outcome unknown. Inspect ESET before any retry.'
         }
         if ($Interactive) { return [pscustomobject]@{ ExitCode = $process.ExitCode; StdOut = ''; StdErr = '' } }
         $process.WaitForExit()
+        $remaining = [Math]::Max(0,($TimeoutSeconds * 1000 - [int]$clock.ElapsedMilliseconds))
+        if (-not [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($stdoutTask,$stderrTask),[int]$remaining)) {
+            throw 'Output collection timed out; a descendant may still be active. Outcome unknown; inspect ESET before any retry.'
+        }
         return [pscustomobject]@{ ExitCode = $process.ExitCode; StdOut = $stdoutTask.Result; StdErr = $stderrTask.Result }
     } finally { $process.Dispose() }
 }
@@ -797,7 +802,7 @@ function Invoke-QuickApplyTransaction {
         try { Write-QuickDiagnostic -Path $diagPath -Message ('Stage=' + $stage + '; ' + $raw) } catch {}
         $status = if ($importStarted) { 'IMPORT_OR_READBACK_UNVERIFIED' } else { 'FAILED_BEFORE_IMPORT' }
         try { Write-QuickResults -RunRoot $RunRoot -Status $status -Added $added -Unchanged $unchanged } catch {}
-        throw ('Apply transaction failed at ' + $stage + '. No automatic rollback was attempted; inspect private diagnostics: ' + $diagPath + '.')
+            throw ('Apply transaction failed at ' + $stage + '. Import/native-work outcome may be unknown; inspect ESET before retrying. No automatic rollback was attempted; private diagnostics: ' + $diagPath + '.')
     }
 }
 

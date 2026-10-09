@@ -23,29 +23,10 @@ try {
     try { $input.CopyTo($output) } finally { $input.Dispose(); $output.Dispose() }
 } finally { $archive.Dispose() }
 $before=[IO.File]::ReadAllText($xml)
-$start=New-Object Diagnostics.ProcessStartInfo
-$start.FileName=$exe
-$start.Arguments='/version 2 "'+$xml+'"'
-$start.UseShellExecute=$false
-$start.RedirectStandardInput=$true
-$start.RedirectStandardOutput=$true
-$start.RedirectStandardError=$true
-$process=New-Object Diagnostics.Process
-$process.StartInfo=$start
-try {
-    if (-not $process.Start()) { throw 'Signer did not start.' }
-    $outTask=$process.StandardOutput.ReadToEndAsync(); $errTask=$process.StandardError.ReadToEndAsync()
-    # This generated value belongs ONLY to the CI fixture, not a real ESET password.
-    $fixtureInput='synthetic-fixture'
-    $process.StandardInput.WriteLine($fixtureInput)
-    $process.StandardInput.WriteLine($fixtureInput)
-    $process.StandardInput.Close()
-    if (-not $process.WaitForExit(30000)) { $process.Kill(); [void]$process.WaitForExit(5000); throw 'Real signer cannot complete redirected-input fixture within 30 seconds.' }
-    if ($process.ExitCode -ne 0) {
-        $details=($outTask.Result+' '+$errTask.Result).Replace($fixtureInput,'<SYNTHETIC_INPUT>')
-        throw ('Signer fixture exited '+$process.ExitCode+'; native diagnostic: '+$details)
-    }
-} finally { $process.Dispose() }
+# Run in its own host so the helper owns only its private CI console.
+$helper=Join-Path $PSScriptRoot 'Invoke-CiSignerConsole.ps1'
+& powershell.exe -NoProfile -ExecutionPolicy Bypass -File $helper -ExePath $exe -XmlPath $xml
+if ($LASTEXITCODE -ne 0) { throw 'Native console signer fixture failed.' }
 $after=[IO.File]::ReadAllText($xml)
 if ($after -ceq $before) { throw 'Signer reported success but fixture bytes did not change.' }
 $beforeDoc=New-Object Xml.XmlDocument; $beforeDoc.XmlResolver=$null; $beforeDoc.PreserveWhitespace=$true; $beforeDoc.LoadXml($before)
