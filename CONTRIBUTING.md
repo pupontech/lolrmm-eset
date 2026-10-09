@@ -1,6 +1,6 @@
 # Contributing
 
-This repository is currently planning-only. Do not begin Phase 0 or implementation unless the owner has explicitly authorized it and the corresponding Kanban gate is open.
+Phase 0 research is complete. The owner authorized the small append-only Phase 1 POC in `docs/decisions/0002-small-append-poc.md`. Full catalog/GUI development remains behind the owner-live native ESET gate. Scope and acceptance checks must be explicit before changes.
 
 ## Before changes
 

@@ -1,6 +1,6 @@
 # ESET HIPS XML and POC results — pending Phase 1
 
-**Status: no POC performed.** No ESET export, fixture, rule shape, signing behavior, import result, or enforcement result has been observed. Do not infer native XML from examples or old tutorials.
+**Status: public native XML sample discovery and local fixture probes completed; owner-live POC remains unverified.** ESET KB7375 supplies an official small consumer HIPS ITEM/NODE append example; a retrieved community export identifies itself as consumer 15.0.18 and contains candidate block/start-operation fields. Neither is a current-build owner export or proof of import/enforcement. The narrowed candidate is specified in ADR 0002; do not certify ESET 19 merely because its export resembles these samples.
 
 This document is the evidence record required by the Phase 1 gate. Use sanitized configuration samples captured from the exact ESET consumer product/version under test. Never commit passwords, license data, personal paths, machine identifiers, or other sensitive settings. Keep an untouched local backup outside source control where required.
 

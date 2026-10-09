@@ -41,6 +41,14 @@ catalog-cache.json
 # Research snapshots are local-only until redistribution terms are confirmed
 research/evidence/lolrmm-rmm_tools-*.json
 
+# Private quick-rule evidence, local verification and test bundles
+.hermes/
+quick-rule-evidence/
+community-*.xml
+screen_readers_config.xml
+*.zip
+*.zip.sha256
+
 # OS noise
 .DS_Store
 Thumbs.db

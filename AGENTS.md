@@ -2,7 +2,7 @@
 
 ## Project state and start gate
 
-This repository is **planning/setup only**. There is no implementation yet. Do not begin research, coding, VM provisioning, ESET installation/configuration, catalog downloads, or ESET mutation until the owner explicitly starts Phase 0. The Kanban root card is the authoritative owner gate; all phase cards must remain unassigned and dependency-gated until then. A request to set up the project is not authorization to start its phases.
+Phase 0 research is complete. Phase 1 has observation tooling but has NOT passed its native rule import/enforcement gate. The owner authorized continuing with the small append-only POC in `docs/decisions/0002-small-append-poc.md`. That accepted narrower POC is the current implementation scope; the full catalog/GUI remains deferred. The owner runs live ESET acceptance; agents prepare code, Windows CI and test ZIPs without installing or mutating live ESET.
 
 Read `docs/PROJECT_BRIEF.md`, `docs/roadmap.md`, and `docs/decisions/0001-project-scope-and-gates.md` before work. Treat the brief as the product contract. If requirements conflict or safety is uncertain, fail closed and record the uncertainty; never invent ESET XML or command behavior.
 

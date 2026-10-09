@@ -1,0 +1,103 @@
+name: Quick-rule append POC
+on:
+  workflow_dispatch:
+  push:
+    branches: ['feat/quick-append-poc']
+    paths: ['poc/quick-rules/**', 'scripts/Test-QuickPackage.ps1', '.github/workflows/quick-rules-poc.yml']
+  pull_request:
+    paths: ['poc/quick-rules/**', 'scripts/Test-QuickPackage.ps1', '.github/workflows/quick-rules-poc.yml']
+permissions:
+  contents: read
+jobs:
+  windows:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-2025]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Exercise official signer with public XML and synthetic input only
+        shell: powershell
+        run: |
+          ./scripts/Test-XmlSigner.ps1 -OutputDirectory (Join-Path $env:RUNNER_TEMP 'quick-signer-proof')
+          if ($LASTEXITCODE -ne 0) { throw 'Native signer probe failed' }
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NativeSigner-${{ matrix.os }}
+          path: ${{ runner.temp }}/quick-signer-proof/signed-fixture.xml
+          if-no-files-found: error
+      - name: Behavioral tests on Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          ./poc/quick-rules/tests/Test-QuickRules.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell suite failed' }
+          ./scripts/Test-QuickBoundaries.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell boundary suite failed' }
+          exit 0
+      - name: Behavioral tests on PowerShell 7
+        shell: pwsh
+        run: |
+          ./poc/quick-rules/tests/Test-QuickRules.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 suite failed' }
+          ./scripts/Test-QuickBoundaries.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 boundary suite failed' }
+          exit 0
+      - name: Parse all new scripts and enforce byte constraints
+        shell: powershell
+        run: |
+          $paths = @(Get-ChildItem poc/quick-rules -Filter '*.ps1' -Recurse) + @(Get-Item scripts/Test-QuickPackage.ps1)
+          foreach ($file in $paths) {
+            $tokens=$null; $errors=$null
+            [void][Management.Automation.Language.Parser]::ParseFile($file.FullName,[ref]$tokens,[ref]$errors)
+            if ($errors.Count) { throw ('Parse failed: ' + $file.Name) }
+            if (@([IO.File]::ReadAllBytes($file.FullName) | Where-Object { $_ -gt 127 }).Count) { throw ('Non-ASCII: ' + $file.Name) }
+          }
+          $bat = [IO.File]::ReadAllText((Resolve-Path poc/quick-rules/START-HERE.bat))
+          if ($bat.Replace("`r`n",'').Contains("`n")) { throw 'BAT requires CRLF' }
+      - name: Build self-contained harmless test executable
+        shell: powershell
+        run: |
+          dotnet publish poc/LolrmmEsetTest/LolrmmEsetTest.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o artifacts/publish
+          if ($LASTEXITCODE -ne 0) { throw 'Test EXE build failed' }
+          ./poc/tests/Test-LolrmmEsetTest.ps1 -ExecutablePath artifacts/publish/LolrmmEsetTest.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Test EXE smoke failed' }
+          exit 0
+      - name: Package explicit allowlist
+        shell: powershell
+        run: |
+          $stage = Join-Path $env:RUNNER_TEMP 'quick-rule-stage'
+          [void](New-Item -ItemType Directory -Path $stage)
+          $names = @('Eset-QuickRules.ps1','START-HERE.bat','START-HERE.ps1','rules.csv','README.md','VERSION')
+          foreach ($name in $names) { Copy-Item -LiteralPath (Join-Path 'poc/quick-rules' $name) -Destination $stage }
+          Copy-Item artifacts/publish/LolrmmEsetTest.exe $stage/
+          [IO.File]::WriteAllLines((Join-Path $stage 'PROVENANCE.txt'), @("Source SHA: $env:GITHUB_SHA", "Windows runner: $env:RUNNER_OS", 'Artifact: experimental owner-run POC, not a release', 'Live ESET import/enforcement: NOT TESTED', 'Native Phase 1 gate: UNVERIFIED'), [Text.Encoding]::ASCII)
+          $manifest = Get-ChildItem -LiteralPath $stage -File | Sort-Object Name | ForEach-Object { '{0}  {1}' -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name }
+          [IO.File]::WriteAllLines((Join-Path $stage 'SHA256SUMS.txt'), $manifest, [Text.Encoding]::ASCII)
+          $version = ([IO.File]::ReadAllText((Join-Path $stage 'VERSION'))).Trim()
+          if ($version -cnotmatch '^\d+\.\d+\.\d+-poc\.\d+$') { throw 'Unexpected POC version' }
+          $publish = Join-Path $env:RUNNER_TEMP 'quick-rule-artifacts'
+          [void](New-Item -ItemType Directory -Path $publish)
+          $zipName = 'LOLRMM-ESET-QuickRules-' + $version + '.zip'
+          $zip = Join-Path $publish $zipName
+          Compress-Archive -Path (Join-Path $stage '*') -DestinationPath $zip
+          $line = (Get-FileHash $zip -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + $zipName
+          [IO.File]::WriteAllText(($zip+'.sha256'), ($line+"`n"), [Text.Encoding]::ASCII)
+          "QUICK_ZIP=$zip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "QUICK_ARTIFACTS=$publish" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+      - name: Verify immutable ZIP and actual extracted launcher
+        shell: powershell
+        run: |
+          ./scripts/Test-QuickPackage.ps1 -ZipPath $env:QUICK_ZIP -SourceCommit $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'Package proof failed' }
+          exit 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: QuickRules-${{ matrix.os }}
+          path: ${{ env.QUICK_ARTIFACTS }}
+          if-no-files-found: error

@@ -1,40 +1,46 @@
-# LOLRMM → ESET
+# LOLRMM to ESET: quick-rule POC
 
-**Status: Phase 0 research drafted; independent review is underway. No application or ESET-rule code exists yet.**
+**Current scope: a small, experimental append-only HIPS POC. Live ESET acceptance has NOT passed.**
 
-A planned open-source Windows utility to let a user review the public LOLRMM catalog, choose which RMM products should be blocked, and synchronize suitable indicators into native rules in locally installed consumer ESET HIPS.
+The immediate goal is a chosen list of exact executable paths -> preview -> confirmed append -> verify -> exit. No catalog synchronizer, GUI, background process, database or removal engine is being built yet. ESET would perform enforcement; this adds no antivirus signatures.
 
-The intended flow is:
+## Start here
 
-> Open → review/search the RMM list → choose what to block → preview → apply to ESET → close.
+The current candidate is [poc/quick-rules](poc/quick-rules/README.md). A Windows CI test ZIP includes a self-contained harmless `LolrmmEsetTest.exe`, the PowerShell script, launcher and exact-path CSV. It is for the owner's isolated ESET test machine only, not production or a certified release.
 
-ESET itself would enforce the rules. This application is not intended to remain running and does not create custom antivirus signatures.
+- Double-click `START-HERE.bat` for non-mutating live Preview.
+- Run `START-HERE.bat -Apply` only for the explicitly confirmed isolated-machine experiment.
+- Run `START-HERE.bat -ValidateOnly` for package validation with no ESET access.
 
-## Current project status
+Use the ZIP, not this source checkout, for the packaged test: the source tree intentionally does not commit the built EXE. Do not change `rules.csv` to target real RMM tools before the harmless import/block/log/unblock test passes. Exact paths do not cover renamed or relocated executables.
 
-- Project brief, agent instructions, phase plan, local workspace, public GitHub repository, and Hermes Kanban tracking are set up.
-- Phase 0 current-source research is complete; citation/evidence verification passes and the independent review findings were reconciled. No HIPS XML fixture or enforcement test exists, so compatibility is not claimed.
-- Phase 1's ESET configuration round-trip and enforcement POC is a hard gate. Full application development must not begin unless that POC passes.
-- The owner selected an isolated owner-run Windows/ESET test machine or VM for the POC. Agents will not provision VMs or install/mutate live ESET; see [ADR 0001](docs/decisions/0001-project-scope-and-gates.md).
+## Current evidence and limitations
 
-## Intended scope
+- Phase 0 research is complete.
+- Public native XML exists: ESET's official accessibility sample demonstrates a small HIPS collection with APPEND=1; a community consumer 15.0.18 export supplies candidate block/start-operation fields. Neither establishes current-build compatibility.
+- The quick POC targets only consumer major 19 for an explicit unvalidated test. Unknown products/versions/shapes are refused.
+- Hosted Windows tests can prove script, fixture and package behavior, not native ESET import/enforcement. Actual signing, append preservation, identifier handling, duplicate prevention and block/log/unblock must be demonstrated by the owner.
+- No agents install ESET, provision VMs or mutate live configurations. No public licensed release is created; the license remains unselected.
 
-Consumer ESET Windows products only, with ESET Security Ultimate / ESET HOME Security Ultimate as the primary target. The application will use documented local ESET configuration facilities, primarily HIPS and ESET CMD, only after current official documentation and a real POC verify the behavior. Enterprise products and cloud/managed services are out of scope.
+The older [guided observation kit](poc/automated/README.md) is preserved for historical/reference use, not the quick-injection entrypoint.
 
-LOLRMM's structured catalog is the canonical list: <https://lolrmm.io/api/rmm_tools.json>. AnyDesk and TeamViewer are planned to default to unselected; other safely representable tools default selected. User choices persist across refreshes. Downloading a new catalog never applies rules automatically.
+## Design and verification
 
-## Project documents
-
-- [Full project brief](docs/PROJECT_BRIEF.md)
-- [Phase plan and gates](docs/roadmap.md)
-- [Research record](docs/research.md) — Phase 0 complete; ESET POC still pending
-- [ESET HIPS XML / POC evidence](docs/eset-hips-xml.md) — pending Phase 1
-- [Testing record](docs/testing.md) — pending implementation and owner validation
-- [Project decisions](docs/decisions/)
+- [Current narrowed POC decision](docs/decisions/0002-small-append-poc.md)
+- [Owner-run environment decision](docs/decisions/0001-project-scope-and-gates.md)
+- [Original full application brief](docs/PROJECT_BRIEF.md) - downstream scope deferred
+- [Phase roadmap](docs/roadmap.md)
+- [Native XML evidence record](docs/eset-hips-xml.md)
+- [Testing record](docs/testing.md)
 - [Agent instructions](AGENTS.md)
 
-## Planned implementation and testing
+Run the dependency-free quick-rule tests with Windows PowerShell 5.1 or PowerShell 7:
 
-The preferred stack is C# on a current supported .NET version and a native Windows GUI (WPF is the default unless research justifies otherwise). The exact framework/version, ESET product/version support, configuration format, signing behavior, and HIPS matching semantics remain research questions. No build or installation instructions are claimed yet.
+```text
+powershell.exe -NoProfile -File poc\quick-rules\tests\Test-QuickRules.ps1
+pwsh -NoProfile -File poc/quick-rules/tests/Test-QuickRules.ps1
+```
 
-The project will require unit tests, GitHub Actions Windows-runner verification, and owner-performed live ESET acceptance before a release can be called complete. No license has been selected yet; choose one before publishing a distributable release. LOLRMM and ESET are not project endorsers; their marks belong to their respective owners.
+Windows CI builds and verifies the exact-source test ZIP. Only tests actually recorded in `docs/testing.md` are claimed as executed. Live ESET compatibility and the downstream app remain gated.
+
+LOLRMM and ESET do not endorse this project. RMM software can be legitimate; blocking it can disrupt authorized support.
