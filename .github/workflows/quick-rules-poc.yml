@@ -50,6 +50,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell process suite failed' }
           ./scripts/Test-QuickVersion.ps1
           if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell version suite failed' }
+          ./scripts/Test-QuickDiscovery.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell discovery suite failed' }
           exit 0
       - name: Behavioral tests on PowerShell 7
         shell: pwsh
@@ -66,6 +68,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 process suite failed' }
           ./scripts/Test-QuickVersion.ps1
           if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 version suite failed' }
+          ./scripts/Test-QuickDiscovery.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 discovery suite failed' }
           exit 0
       - name: Parse all new scripts and enforce byte constraints
         shell: powershell

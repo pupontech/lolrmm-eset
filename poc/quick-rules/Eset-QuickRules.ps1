@@ -547,7 +547,7 @@ function Assert-QuickEsetSignature {
 function Get-QuickEsetInstall {
     if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT) { throw 'Live ESET Preview and Apply require Windows.' }
     $views = @([Microsoft.Win32.RegistryView]::Registry64, [Microsoft.Win32.RegistryView]::Registry32)
-    $matches = New-Object System.Collections.Generic.List[object]
+    $installedProducts = New-Object System.Collections.Generic.List[object]
     foreach ($view in $views) {
         $base = $null
         try {
@@ -565,16 +565,19 @@ function Get-QuickEsetInstall {
                         $install = [string]$key.GetValue('InstallLocation', '')
                         if ([string]::IsNullOrWhiteSpace($install)) {
                             $icon = [string]$key.GetValue('DisplayIcon', '')
-                            if ($icon -match '^"?(.+?\.exe)(?:,\d+)?"?$') { $install = Split-Path -Parent $Matches[1] }
+                            if ($icon -match '^(?:"([^"]+\.exe)"|([^"]+\.exe))(?:,\d+)?$') {
+                                $iconPath = if ($Matches[1]) { $Matches[1] } else { $Matches[2] }
+                                $install = Split-Path -Parent $iconPath
+                            }
                         }
-                        $matches.Add([pscustomobject]@{ Name = $display; Version = $version; InstallLocation = $install })
+                        $installedProducts.Add([pscustomobject]@{ Name = $display; Version = $version; InstallLocation = $install })
                     }
                 } finally { $key.Dispose() }
             }
             $uninstall.Dispose()
         } finally { if ($null -ne $base) { $base.Dispose() } }
     }
-    $unique = @($matches | Sort-Object Name, Version, InstallLocation -Unique)
+    $unique = @($installedProducts | Sort-Object Name, Version, InstallLocation -Unique)
     if ($unique.Count -ne 1) { throw 'Could not identify exactly one installed ESET consumer product major 19.' }
     $candidates = New-Object System.Collections.Generic.List[string]
     if (-not [string]::IsNullOrWhiteSpace($unique[0].InstallLocation)) { $candidates.Add((Join-Path $unique[0].InstallLocation 'ecmd.exe')) }
