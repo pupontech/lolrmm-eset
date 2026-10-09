@@ -406,7 +406,16 @@ function Get-QuickRulesPlan {
         if ($existingByName.ContainsKey($key)) {
             $existing = $existingByName[$key]
             $expected = New-QuickExpectedRule -Document $Configuration -Id $existing.GetAttribute('NAME') -RuleName $spec.RuleName -Path $spec.Path
-            if ((Get-QuickCanonicalXml $existing -IgnoreRootId) -cne (Get-QuickCanonicalXml $expected -IgnoreRootId)) {
+            $comparable = [System.Xml.XmlElement]$existing.CloneNode($true)
+            $targetLists = Get-QuickDirectElements $comparable 'ITEM' 'peTargets'
+            if ($targetLists.Count -eq 1) {
+                $targets = Get-QuickDirectElements $targetLists[0] 'NODE' '1'
+                if ($targets.Count -eq 1 -and $targets[0].GetAttribute('TYPE') -ceq 'string' -and
+                    $targets[0].GetAttribute('VALUE').Equals($spec.Path,[StringComparison]::OrdinalIgnoreCase)) {
+                    $targets[0].SetAttribute('VALUE',$spec.Path)
+                }
+            }
+            if ((Get-QuickCanonicalXml $comparable -IgnoreRootId) -cne (Get-QuickCanonicalXml $expected -IgnoreRootId)) {
                 throw 'An owned rule name already exists with different semantics; no update or removal is allowed.'
             }
             $unchanged.Add($spec)
@@ -753,13 +762,21 @@ function Invoke-QuickApplyTransaction {
         Assert-QuickProviderResult -Result $signResult -Operation 'Official interactive signing'
         $signed = Read-QuickXmlFile -Path $payloadPath
         if ((Get-QuickCanonicalXml $signed) -cne $payloadCanonical) { throw 'Signer changed payload XML outside the inspected no-change format.' }
+        $signedHash = Get-QuickFileHash -Path $payloadPath
         $stage = 'pre-import concurrency export'
         $concurrent = Get-QuickProviderConfiguration -Providers $Providers -Path $concurrentPath -Operation 'Pre-import safe export'
         if ((Get-QuickCanonicalXml $baseline) -cne (Get-QuickCanonicalXml $concurrent)) { throw 'Configuration changed after preview; import was stopped.' }
-        $stage = 'ecmd import'
-        $importStarted = $true
-        $importResult = & $Providers.Import $payloadPath
-        Assert-QuickProviderResult -Result $importResult -Operation 'ESET ecmd import'
+        $stage = 'signed payload integrity'
+        $payloadLock = [IO.File]::Open($payloadPath,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+        try {
+            $hash = [Security.Cryptography.SHA256]::Create()
+            try { $lockedHash = [BitConverter]::ToString($hash.ComputeHash($payloadLock)).Replace('-','') } finally { $hash.Dispose() }
+            if ($lockedHash -cne $signedHash) { throw 'Signed payload changed after validation; import stopped.' }
+            $stage = 'ecmd import'
+            $importStarted = $true
+            $importResult = & $Providers.Import $payloadPath
+            Assert-QuickProviderResult -Result $importResult -Operation 'ESET ecmd import'
+        } finally { $payloadLock.Dispose() }
         $stage = 'post-import readback export'
         $after = Get-QuickProviderConfiguration -Providers $Providers -Path $afterPath -Operation 'Post-import safe export'
         $afterPlan = Get-QuickRulesPlan -Desired $plan.Desired -Configuration $after

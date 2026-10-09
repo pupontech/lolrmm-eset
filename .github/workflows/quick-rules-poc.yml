@@ -3,9 +3,9 @@ on:
   workflow_dispatch:
   push:
     branches: ['feat/quick-append-poc']
-    paths: ['poc/quick-rules/**', 'scripts/Test-QuickPackage.ps1', '.github/workflows/quick-rules-poc.yml']
+    paths: ['poc/quick-rules/**', 'scripts/Test-Quick*.ps1', 'scripts/Test-XmlSigner.ps1', '.github/workflows/quick-rules-poc.yml']
   pull_request:
-    paths: ['poc/quick-rules/**', 'scripts/Test-QuickPackage.ps1', '.github/workflows/quick-rules-poc.yml']
+    paths: ['poc/quick-rules/**', 'scripts/Test-Quick*.ps1', 'scripts/Test-XmlSigner.ps1', '.github/workflows/quick-rules-poc.yml']
 permissions:
   contents: read
 jobs:
@@ -39,6 +39,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell suite failed' }
           ./scripts/Test-QuickBoundaries.ps1
           if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell boundary suite failed' }
+          ./scripts/Test-QuickRegression.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'Windows PowerShell regression suite failed' }
           exit 0
       - name: Behavioral tests on PowerShell 7
         shell: pwsh
@@ -47,6 +49,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 suite failed' }
           ./scripts/Test-QuickBoundaries.ps1
           if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 boundary suite failed' }
+          ./scripts/Test-QuickRegression.ps1
+          if ($LASTEXITCODE -ne 0) { throw 'PowerShell 7 regression suite failed' }
           exit 0
       - name: Parse all new scripts and enforce byte constraints
         shell: powershell

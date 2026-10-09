@@ -36,12 +36,15 @@ try {
     if (-not $process.Start()) { throw 'Signer did not start.' }
     $outTask=$process.StandardOutput.ReadToEndAsync(); $errTask=$process.StandardError.ReadToEndAsync()
     # This generated value belongs ONLY to the CI fixture, not a real ESET password.
-    $fixtureInput='synthetic-ci-'+[guid]::NewGuid().ToString('N')
+    $fixtureInput='synthetic-fixture'
     $process.StandardInput.WriteLine($fixtureInput)
     $process.StandardInput.WriteLine($fixtureInput)
     $process.StandardInput.Close()
     if (-not $process.WaitForExit(30000)) { $process.Kill(); [void]$process.WaitForExit(5000); throw 'Real signer cannot complete redirected-input fixture within 30 seconds.' }
-    if ($process.ExitCode -ne 0) { throw ('Signer fixture exited '+$process.ExitCode+'; no live password used.') }
+    if ($process.ExitCode -ne 0) {
+        $details=($outTask.Result+' '+$errTask.Result).Replace($fixtureInput,'<SYNTHETIC_INPUT>')
+        throw ('Signer fixture exited '+$process.ExitCode+'; native diagnostic: '+$details)
+    }
 } finally { $process.Dispose() }
 $after=[IO.File]::ReadAllText($xml)
 if ($after -ceq $before) { throw 'Signer reported success but fixture bytes did not change.' }
