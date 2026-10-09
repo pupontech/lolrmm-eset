@@ -17,6 +17,7 @@ Reject ($base.OuterXml+'<!-- Signature: AAAA -->')
 Reject ($base.OuterXml+'<!-- Signature: '+$signature+' --><!-- Signature: '+$signature+' -->')
 Reject ('<ESET><VALUE/></ESET><!-- Signature: '+$signature+' -->')
 Reject ('<ESET><!-- Signature: '+$signature+' --><VALUE> </VALUE></ESET>')
+Reject ($base.OuterXml+'<!-- Signature: '+$signature+" `n"+'-->')
 Reject ($base.OuterXml+'<!-- changed --><!-- Signature: '+$signature+' -->')
 if($BeforeFixture -or $SignedFixture) {
     if(-not ($BeforeFixture -and $SignedFixture)) { throw 'Both fixture paths required.' }

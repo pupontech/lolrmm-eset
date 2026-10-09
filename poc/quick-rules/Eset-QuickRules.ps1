@@ -457,11 +457,11 @@ function Assert-QuickSignedPayload {
     # Observed from the official XmlSignTool /version 2 on both Windows CI legs.
     # This validates representation and unchanged content, NOT cryptographic validity.
     $copy = [Xml.XmlDocument]$Signed.CloneNode($true)
-    $markers = @($copy.SelectNodes('//comment()') | Where-Object { $_.Value -cmatch '^ Signature: [A-Za-z0-9+/]{86}== $' })
+    $markers = @($copy.SelectNodes('//comment()') | Where-Object { $_.Value -cmatch '\A Signature: [A-Za-z0-9+/]{86}== \z' })
     if ($markers.Count -ne 1 -or $markers[0].ParentNode -ne $copy) { throw 'Expected exactly one trailing native signature comment.' }
     $last = @($copy.ChildNodes | Where-Object { $_.NodeType -ne [Xml.XmlNodeType]::Whitespace })[-1]
     if ($last -ne $markers[0]) { throw 'Native signature comment is not the final document node.' }
-    $encoded = $markers[0].Value.Substring(12).Trim()
+    $encoded = $markers[0].Value.Substring(12,88)
     if ([Convert]::FromBase64String($encoded).Length -ne 64) { throw 'Unexpected native signature length.' }
     [void]$copy.RemoveChild($markers[0])
     if ((Get-QuickCanonicalXml $Before) -cne (Get-QuickCanonicalXml $copy)) { throw 'Signer changed payload XML beyond the exact observed signature comment.' }
